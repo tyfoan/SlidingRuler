@@ -11,45 +11,241 @@
 import SwiftUI
 import UIKit
 
-/// State machine for the stepping wheel
+// MARK: - State
+
 enum SteppingWheelState {
     case idle
     case dragging
     case decelerating
 }
 
-/// Configuration for SteppingWheel appearance
-public struct SteppingWheelConfig {
-    /// Spacing between tick marks in points
-    public var tickSpacing: CGFloat
+// MARK: - Style Configuration
 
-    /// Whether to show value labels
-    public var showLabels: Bool
+/// Complete visual style for SteppingWheel
+public struct SteppingWheelStyle {
 
-    /// Show label every N ticks (only when showLabels is true)
-    public var labelInterval: Int
+    // MARK: - Tick Appearance
 
-    /// Accent color for the center indicator
-    public var accentColor: Color
+    /// Color of tick marks
+    public var tickColor: Color
 
-    /// Height of the control
-    public var height: CGFloat
+    /// Width of minor ticks
+    public var minorTickWidth: CGFloat
 
-    /// Tick height for minor ticks
+    /// Width of major ticks
+    public var majorTickWidth: CGFloat
+
+    /// Height of minor ticks
     public var minorTickHeight: CGFloat
 
-    /// Tick height for major ticks (every 5th)
+    /// Height of major ticks
     public var majorTickHeight: CGFloat
 
-    /// Major tick interval
+    /// Interval for major ticks (e.g., every 5th tick)
+    public var majorTickInterval: Int
+
+    /// Whether ticks fade towards edges
+    public var tickFadeEnabled: Bool
+
+    /// Opacity of ticks at center (1.0 = full)
+    public var tickCenterOpacity: CGFloat
+
+    /// Opacity of ticks at edges (0.0 = invisible)
+    public var tickEdgeOpacity: CGFloat
+
+    // MARK: - Center Indicator
+
+    /// Whether to show the center indicator
+    public var showCenterIndicator: Bool
+
+    /// Style of center indicator
+    public var centerIndicatorStyle: CenterIndicatorStyle
+
+    /// Accent color for center indicator
+    public var accentColor: Color
+
+    /// Width of center indicator line
+    public var centerIndicatorWidth: CGFloat
+
+    /// Height of center indicator
+    public var centerIndicatorHeight: CGFloat
+
+    // MARK: - Background
+
+    /// Background color (nil = transparent)
+    public var backgroundColor: Color?
+
+    /// Whether to show edge fade gradients
+    public var showEdgeFade: Bool
+
+    /// Color for edge fade (usually matches parent background)
+    public var edgeFadeColor: Color
+
+    /// Width of edge fade gradient
+    public var edgeFadeWidth: CGFloat
+
+    // MARK: - Layout
+
+    /// Spacing between tick marks
+    public var tickSpacing: CGFloat
+
+    /// Total height of the control
+    public var height: CGFloat
+
+    // MARK: - Center Indicator Styles
+
+    public enum CenterIndicatorStyle {
+        case line           // Simple colored line
+        case lineWithGlow   // Line with subtle glow
+        case box            // Rounded rectangle box
+        case triangle       // Triangle pointer
+        case none           // No indicator (just use tick highlight)
+    }
+
+    // MARK: - Initializer
+
+    public init(
+        tickColor: Color = .white,
+        minorTickWidth: CGFloat = 1.5,
+        majorTickWidth: CGFloat = 2,
+        minorTickHeight: CGFloat = 12,
+        majorTickHeight: CGFloat = 20,
+        majorTickInterval: Int = 5,
+        tickFadeEnabled: Bool = true,
+        tickCenterOpacity: CGFloat = 0.6,
+        tickEdgeOpacity: CGFloat = 0.15,
+        showCenterIndicator: Bool = true,
+        centerIndicatorStyle: CenterIndicatorStyle = .line,
+        accentColor: Color = .white,
+        centerIndicatorWidth: CGFloat = 2,
+        centerIndicatorHeight: CGFloat = 28,
+        backgroundColor: Color? = nil,
+        showEdgeFade: Bool = true,
+        edgeFadeColor: Color = .black,
+        edgeFadeWidth: CGFloat = 50,
+        tickSpacing: CGFloat = 12,
+        height: CGFloat = 48
+    ) {
+        self.tickColor = tickColor
+        self.minorTickWidth = minorTickWidth
+        self.majorTickWidth = majorTickWidth
+        self.minorTickHeight = minorTickHeight
+        self.majorTickHeight = majorTickHeight
+        self.majorTickInterval = majorTickInterval
+        self.tickFadeEnabled = tickFadeEnabled
+        self.tickCenterOpacity = tickCenterOpacity
+        self.tickEdgeOpacity = tickEdgeOpacity
+        self.showCenterIndicator = showCenterIndicator
+        self.centerIndicatorStyle = centerIndicatorStyle
+        self.accentColor = accentColor
+        self.centerIndicatorWidth = centerIndicatorWidth
+        self.centerIndicatorHeight = centerIndicatorHeight
+        self.backgroundColor = backgroundColor
+        self.showEdgeFade = showEdgeFade
+        self.edgeFadeColor = edgeFadeColor
+        self.edgeFadeWidth = edgeFadeWidth
+        self.tickSpacing = tickSpacing
+        self.height = height
+    }
+
+    // MARK: - Preset Styles
+
+    /// Minimal clean style - simple white ticks on transparent background
+    public static let minimal = SteppingWheelStyle(
+        tickColor: .white,
+        minorTickWidth: 1,
+        majorTickWidth: 1.5,
+        minorTickHeight: 10,
+        majorTickHeight: 16,
+        majorTickInterval: 5,
+        tickFadeEnabled: true,
+        tickCenterOpacity: 0.5,
+        tickEdgeOpacity: 0.1,
+        showCenterIndicator: true,
+        centerIndicatorStyle: .line,
+        accentColor: .white,
+        centerIndicatorWidth: 2,
+        centerIndicatorHeight: 24,
+        backgroundColor: nil,
+        showEdgeFade: true,
+        edgeFadeColor: .black,
+        edgeFadeWidth: 40,
+        tickSpacing: 10,
+        height: 40
+    )
+
+    /// Default balanced style
+    public static let `default` = SteppingWheelStyle()
+
+    /// Pro style with accent glow
+    public static func pro(accent: Color) -> SteppingWheelStyle {
+        SteppingWheelStyle(
+            tickColor: .white,
+            minorTickWidth: 1.5,
+            majorTickWidth: 2.5,
+            minorTickHeight: 12,
+            majorTickHeight: 22,
+            majorTickInterval: 5,
+            tickFadeEnabled: true,
+            tickCenterOpacity: 0.7,
+            tickEdgeOpacity: 0.1,
+            showCenterIndicator: true,
+            centerIndicatorStyle: .lineWithGlow,
+            accentColor: accent,
+            centerIndicatorWidth: 2.5,
+            centerIndicatorHeight: 30,
+            backgroundColor: Color(white: 0.06),
+            showEdgeFade: true,
+            edgeFadeColor: .black,
+            edgeFadeWidth: 60,
+            tickSpacing: 14,
+            height: 52
+        )
+    }
+
+    /// Compact style for tight spaces
+    public static let compact = SteppingWheelStyle(
+        tickColor: .white,
+        minorTickWidth: 1,
+        majorTickWidth: 1.5,
+        minorTickHeight: 8,
+        majorTickHeight: 12,
+        majorTickInterval: 5,
+        tickFadeEnabled: true,
+        tickCenterOpacity: 0.5,
+        tickEdgeOpacity: 0.15,
+        showCenterIndicator: true,
+        centerIndicatorStyle: .line,
+        accentColor: .white,
+        centerIndicatorWidth: 1.5,
+        centerIndicatorHeight: 16,
+        backgroundColor: nil,
+        showEdgeFade: true,
+        edgeFadeColor: .black,
+        edgeFadeWidth: 30,
+        tickSpacing: 8,
+        height: 32
+    )
+}
+
+// MARK: - Legacy Config (for backward compatibility)
+
+public struct SteppingWheelConfig {
+    public var tickSpacing: CGFloat
+    public var showLabels: Bool
+    public var labelInterval: Int
+    public var accentColor: Color
+    public var height: CGFloat
+    public var minorTickHeight: CGFloat
+    public var majorTickHeight: CGFloat
     public var majorTickInterval: Int
 
     public init(
         tickSpacing: CGFloat = 12,
         showLabels: Bool = false,
         labelInterval: Int = 10,
-        accentColor: Color = Color(red: 0.83, green: 0.65, blue: 0.45), // Warm gold
-        height: CGFloat = 56,
+        accentColor: Color = .white,
+        height: CGFloat = 48,
         minorTickHeight: CGFloat = 12,
         majorTickHeight: CGFloat = 20,
         majorTickInterval: Int = 5
@@ -65,10 +261,23 @@ public struct SteppingWheelConfig {
     }
 
     public static let `default` = SteppingWheelConfig()
+
+    /// Convert to new style system
+    func toStyle() -> SteppingWheelStyle {
+        SteppingWheelStyle(
+            tickColor: .white,
+            minorTickHeight: minorTickHeight,
+            majorTickHeight: majorTickHeight,
+            majorTickInterval: majorTickInterval,
+            accentColor: accentColor,
+            tickSpacing: tickSpacing,
+            height: height
+        )
+    }
 }
 
-/// A discrete stepping wheel control for precise value selection.
-/// Premium design inspired by professional video equipment.
+// MARK: - SteppingWheel View
+
 @available(iOS 13.0, *)
 public struct SteppingWheel<V>: View where V: BinaryFloatingPoint, V.Stride: BinaryFloatingPoint {
 
@@ -79,7 +288,7 @@ public struct SteppingWheel<V>: View where V: BinaryFloatingPoint, V.Stride: Bin
     private let step: V.Stride
     private let onStep: ((V) -> Void)?
     private let onEditingChanged: ((Bool) -> Void)?
-    private let config: SteppingWheelConfig
+    private let style: SteppingWheelStyle
 
     // MARK: - Internal State
 
@@ -109,23 +318,41 @@ public struct SteppingWheel<V>: View where V: BinaryFloatingPoint, V.Stride: Bin
 
     private var renderOffset: CGFloat {
         let stepIndex = (value - bounds.lowerBound) / V(step)
-        return -CGFloat(stepIndex) * config.tickSpacing
+        return -CGFloat(stepIndex) * style.tickSpacing
     }
 
-    // MARK: - Initialization
+    // MARK: - Initializers
 
+    /// New style-based initializer
     public init(
         value: Binding<V>,
         in bounds: ClosedRange<V>,
         step: V.Stride = 1,
-        config: SteppingWheelConfig = .default,
+        style: SteppingWheelStyle = .default,
         onStep: ((V) -> Void)? = nil,
         onEditingChanged: ((Bool) -> Void)? = nil
     ) {
         self._value = value
         self.bounds = bounds
         self.step = step
-        self.config = config
+        self.style = style
+        self.onStep = onStep
+        self.onEditingChanged = onEditingChanged
+    }
+
+    /// Legacy config-based initializer (backward compatible)
+    public init(
+        value: Binding<V>,
+        in bounds: ClosedRange<V>,
+        step: V.Stride = 1,
+        config: SteppingWheelConfig,
+        onStep: ((V) -> Void)? = nil,
+        onEditingChanged: ((Bool) -> Void)? = nil
+    ) {
+        self._value = value
+        self.bounds = bounds
+        self.step = step
+        self.style = config.toStyle()
         self.onStep = onStep
         self.onEditingChanged = onEditingChanged
     }
@@ -135,43 +362,48 @@ public struct SteppingWheel<V>: View where V: BinaryFloatingPoint, V.Stride: Bin
     public var body: some View {
         GeometryReader { geometry in
             ZStack(alignment: .center) {
-                // Atmospheric background
-                WheelBackground()
+                // Background
+                if let bgColor = style.backgroundColor {
+                    bgColor
+                }
 
                 // Tick marks layer
                 HStack(spacing: 0) {
                     ForEach(0..<stepCount, id: \.self) { index in
-                        PremiumTickView(
+                        TickView(
                             index: index,
-                            value: bounds.lowerBound + V(index) * V(step),
                             distanceFromCenter: distanceFromCenter(index: index, width: geometry.size.width),
-                            config: config
+                            style: style
                         )
                     }
                 }
                 .offset(x: effectiveOffset(in: geometry.size.width))
 
                 // Edge fade overlays
-                HStack {
-                    LinearGradient(
-                        colors: [Color.black, Color.black.opacity(0)],
-                        startPoint: .leading,
-                        endPoint: .trailing
-                    )
-                    .frame(width: 60)
+                if style.showEdgeFade {
+                    HStack {
+                        LinearGradient(
+                            colors: [style.edgeFadeColor, style.edgeFadeColor.opacity(0)],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                        .frame(width: style.edgeFadeWidth)
 
-                    Spacer()
+                        Spacer()
 
-                    LinearGradient(
-                        colors: [Color.black.opacity(0), Color.black],
-                        startPoint: .leading,
-                        endPoint: .trailing
-                    )
-                    .frame(width: 60)
+                        LinearGradient(
+                            colors: [style.edgeFadeColor.opacity(0), style.edgeFadeColor],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                        .frame(width: style.edgeFadeWidth)
+                    }
                 }
 
-                // Premium center indicator
-                CenterIndicatorPremium(accentColor: config.accentColor)
+                // Center indicator
+                if style.showCenterIndicator {
+                    CenterIndicator(style: style)
+                }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .clipped()
@@ -179,7 +411,7 @@ public struct SteppingWheel<V>: View where V: BinaryFloatingPoint, V.Stride: Bin
                 controlWidth = geometry.size.width
             }
         }
-        .frame(height: config.height)
+        .frame(height: style.height)
         .contentShape(Rectangle())
         .onHorizontalDragGesture(
             initialTouch: handleTouchBegan,
@@ -193,7 +425,7 @@ public struct SteppingWheel<V>: View where V: BinaryFloatingPoint, V.Stride: Bin
     private func distanceFromCenter(index: Int, width: CGFloat) -> CGFloat {
         let centerIndex = currentStepIndex
         let indexDiff = abs(index - centerIndex)
-        let pixelDistance = CGFloat(indexDiff) * config.tickSpacing
+        let pixelDistance = CGFloat(indexDiff) * style.tickSpacing
         let maxDistance = width / 2
         return min(pixelDistance / maxDistance, 1.0)
     }
@@ -201,14 +433,14 @@ public struct SteppingWheel<V>: View where V: BinaryFloatingPoint, V.Stride: Bin
     // MARK: - Offset Calculation
 
     private func effectiveOffset(in width: CGFloat) -> CGFloat {
-        let centerOffset = width / 2 - config.tickSpacing / 2
+        let centerOffset = width / 2 - style.tickSpacing / 2
 
         switch state {
         case .idle:
             return centerOffset + renderOffset
         case .dragging, .decelerating:
             let stepIndex = (dragStartValue - bounds.lowerBound) / V(step)
-            let baseOffset = -CGFloat(stepIndex) * config.tickSpacing
+            let baseOffset = -CGFloat(stepIndex) * style.tickSpacing
             return centerOffset + baseOffset + dragOffset
         }
     }
@@ -261,19 +493,15 @@ public struct SteppingWheel<V>: View where V: BinaryFloatingPoint, V.Stride: Bin
         let rawOffset = gesture.translation.width
         velocity = gesture.velocity
 
-        // Calculate boundary limits for the offset
         let startStepIndex = Int((dragStartValue - bounds.lowerBound) / V(step))
-        let maxOffsetLeft = CGFloat(startStepIndex) * config.tickSpacing  // Can scroll left to index 0
-        let maxOffsetRight = -CGFloat(stepCount - 1 - startStepIndex) * config.tickSpacing  // Can scroll right to last index
+        let maxOffsetLeft = CGFloat(startStepIndex) * style.tickSpacing
+        let maxOffsetRight = -CGFloat(stepCount - 1 - startStepIndex) * style.tickSpacing
 
-        // Clamp offset to valid bounds with rubber-band effect at edges
         let clampedOffset: CGFloat
         if rawOffset > maxOffsetLeft {
-            // At start boundary - rubber band
             let overflow = rawOffset - maxOffsetLeft
             clampedOffset = maxOffsetLeft + overflow * 0.2
         } else if rawOffset < maxOffsetRight {
-            // At end boundary - rubber band
             let overflow = rawOffset - maxOffsetRight
             clampedOffset = maxOffsetRight + overflow * 0.2
         } else {
@@ -282,8 +510,8 @@ public struct SteppingWheel<V>: View where V: BinaryFloatingPoint, V.Stride: Bin
 
         dragOffset = clampedOffset
 
-        let totalOffset = rawOffset  // Use raw for step calculation
-        let stepsDelta = Int((-totalOffset / config.tickSpacing).rounded())
+        let totalOffset = rawOffset
+        let stepsDelta = Int((-totalOffset / style.tickSpacing).rounded())
         let newStepIndex = startStepIndex + stepsDelta
         let clampedIndex = max(0, min(stepCount - 1, newStepIndex))
 
@@ -302,17 +530,13 @@ public struct SteppingWheel<V>: View where V: BinaryFloatingPoint, V.Stride: Bin
     private func dragEnded(_ gesture: HorizontalDragGestureValue) {
         let endVelocity = gesture.velocity
 
-        // Check if we're at a boundary
         let isAtStartBoundary = currentStepIndex == 0
         let isAtEndBoundary = currentStepIndex == stepCount - 1
 
-        // Don't apply inertia if at boundary and velocity would push past it
         let shouldApplyInertia: Bool
         if isAtStartBoundary && endVelocity > 0 {
-            // At start, trying to go left - no inertia
             shouldApplyInertia = false
         } else if isAtEndBoundary && endVelocity < 0 {
-            // At end, trying to go right - no inertia
             shouldApplyInertia = false
         } else {
             shouldApplyInertia = abs(endVelocity) > 50
@@ -321,13 +545,11 @@ public struct SteppingWheel<V>: View where V: BinaryFloatingPoint, V.Stride: Bin
         if shouldApplyInertia {
             applyInertia(velocity: endVelocity)
         } else {
-            // Snap back from any rubber-band offset
             animateSnapBack()
         }
     }
 
     private func animateSnapBack() {
-        let targetOffset: CGFloat = 0
         let startOffset = dragOffset
 
         if abs(startOffset) < 1 {
@@ -343,7 +565,6 @@ public struct SteppingWheel<V>: View where V: BinaryFloatingPoint, V.Stride: Bin
 
         animationTimer = VSynchedTimer(duration: snapDuration, animations: { progress, _ in
             let t = CGFloat(progress / snapDuration)
-            // Ease out cubic
             let eased = 1 - pow(1 - t, 3)
             self.dragOffset = startOffset * (1 - eased)
         }, completion: { _ in
@@ -354,7 +575,7 @@ public struct SteppingWheel<V>: View where V: BinaryFloatingPoint, V.Stride: Bin
         })
     }
 
-    // MARK: - Smooth Inertia Physics
+    // MARK: - Inertia Physics
 
     private func applyInertia(velocity: CGFloat) {
         state = .decelerating
@@ -366,9 +587,8 @@ public struct SteppingWheel<V>: View where V: BinaryFloatingPoint, V.Stride: Bin
         var currentOffset = dragOffset
         let startStepIndex = Int((dragStartValue - bounds.lowerBound) / V(step))
 
-        // Calculate boundary limits for the offset
-        let maxOffsetLeft = CGFloat(startStepIndex) * config.tickSpacing
-        let maxOffsetRight = -CGFloat(stepCount - 1 - startStepIndex) * config.tickSpacing
+        let maxOffsetLeft = CGFloat(startStepIndex) * style.tickSpacing
+        let maxOffsetRight = -CGFloat(stepCount - 1 - startStepIndex) * style.tickSpacing
 
         animationTimer = VSynchedTimer(duration: 3.0, animations: { progress, deltaTime in
             currentVelocity *= friction
@@ -376,7 +596,6 @@ public struct SteppingWheel<V>: View where V: BinaryFloatingPoint, V.Stride: Bin
             let frameOffset = currentVelocity * CGFloat(deltaTime)
             currentOffset += frameOffset
 
-            // Check if we hit boundaries
             var hitBoundary = false
             if currentOffset > maxOffsetLeft {
                 currentOffset = maxOffsetLeft
@@ -390,7 +609,7 @@ public struct SteppingWheel<V>: View where V: BinaryFloatingPoint, V.Stride: Bin
 
             self.dragOffset = currentOffset
 
-            let stepsDelta = Int((-currentOffset / config.tickSpacing).rounded())
+            let stepsDelta = Int((-currentOffset / self.style.tickSpacing).rounded())
             let currentIndex = max(0, min(self.stepCount - 1, startStepIndex + stepsDelta))
 
             if currentIndex != self.previousStepIndex {
@@ -404,7 +623,6 @@ public struct SteppingWheel<V>: View where V: BinaryFloatingPoint, V.Stride: Bin
                 }
             }
 
-            // Stop if velocity too low or hit boundary
             if abs(currentVelocity) < minVelocity || hitBoundary {
                 self.animationTimer?.cancel()
                 self.finalizeDeceleration()
@@ -421,7 +639,7 @@ public struct SteppingWheel<V>: View where V: BinaryFloatingPoint, V.Stride: Bin
         let targetValue = snappedValue
         let targetIndex = Int(((targetValue - bounds.lowerBound) / V(step)).rounded())
         let startStepIndex = Int((dragStartValue - bounds.lowerBound) / V(step))
-        let targetOffset = -CGFloat(targetIndex - startStepIndex) * config.tickSpacing
+        let targetOffset = -CGFloat(targetIndex - startStepIndex) * style.tickSpacing
 
         let snapOffset = targetOffset - dragOffset
 
@@ -463,237 +681,117 @@ public struct SteppingWheel<V>: View where V: BinaryFloatingPoint, V.Stride: Bin
     }
 }
 
-// MARK: - Wheel Background
+// MARK: - Tick View
 
-private struct WheelBackground: View {
-    var body: some View {
-        ZStack {
-            // Base dark gradient
-            LinearGradient(
-                colors: [
-                    Color(white: 0.08),
-                    Color(white: 0.05),
-                    Color(white: 0.08)
-                ],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-
-            // Subtle noise texture effect via overlapping gradients
-            LinearGradient(
-                colors: [
-                    Color.white.opacity(0.02),
-                    Color.clear,
-                    Color.white.opacity(0.01)
-                ],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-
-            // Top highlight line
-            VStack {
-                Rectangle()
-                    .fill(
-                        LinearGradient(
-                            colors: [
-                                Color.white.opacity(0),
-                                Color.white.opacity(0.08),
-                                Color.white.opacity(0)
-                            ],
-                            startPoint: .leading,
-                            endPoint: .trailing
-                        )
-                    )
-                    .frame(height: 0.5)
-                Spacer()
-            }
-
-            // Bottom shadow line
-            VStack {
-                Spacer()
-                Rectangle()
-                    .fill(Color.black.opacity(0.5))
-                    .frame(height: 1)
-            }
-        }
-    }
-}
-
-// MARK: - Premium Tick View
-
-private struct PremiumTickView<V: BinaryFloatingPoint>: View {
+private struct TickView: View {
     let index: Int
-    let value: V
     let distanceFromCenter: CGFloat
-    let config: SteppingWheelConfig
+    let style: SteppingWheelStyle
 
     private var isMajor: Bool {
-        index % config.majorTickInterval == 0
+        index % style.majorTickInterval == 0
     }
 
     private var tickHeight: CGFloat {
-        isMajor ? config.majorTickHeight : config.minorTickHeight
+        isMajor ? style.majorTickHeight : style.minorTickHeight
     }
 
     private var tickWidth: CGFloat {
-        isMajor ? 2.5 : 1.5
+        isMajor ? style.majorTickWidth : style.minorTickWidth
     }
 
-    private var tickOpacity: Double {
-        // Smooth fade based on distance from center
-        let baseBrightness: Double = isMajor ? 0.7 : 0.45
-
-        if distanceFromCenter < 0.2 {
-            return baseBrightness
-        } else if distanceFromCenter < 0.5 {
-            let t = (distanceFromCenter - 0.2) / 0.3
-            return baseBrightness * (1 - t * 0.4)
-        } else {
-            let t = (distanceFromCenter - 0.5) / 0.5
-            return baseBrightness * 0.6 * (1 - t * 0.8)
+    private var tickOpacity: CGFloat {
+        guard style.tickFadeEnabled else {
+            return style.tickCenterOpacity
         }
-    }
 
-    private var glowIntensity: Double {
-        // Only center ticks get glow
-        if distanceFromCenter < 0.15 {
-            return 0.4 * (1 - distanceFromCenter / 0.15)
-        }
-        return 0
+        let range = style.tickCenterOpacity - style.tickEdgeOpacity
+        return style.tickCenterOpacity - (distanceFromCenter * range)
     }
 
     var body: some View {
-        ZStack {
-            // Glow layer for center ticks
-            if glowIntensity > 0 {
-                RoundedRectangle(cornerRadius: tickWidth / 2)
-                    .fill(config.accentColor.opacity(glowIntensity * 0.5))
-                    .frame(width: tickWidth + 4, height: tickHeight + 4)
-                    .blur(radius: 4)
-            }
-
-            // Main tick
-            RoundedRectangle(cornerRadius: tickWidth / 2)
-                .fill(
-                    LinearGradient(
-                        colors: [
-                            Color(white: 0.6).opacity(tickOpacity),
-                            Color(white: 0.35).opacity(tickOpacity * 0.7)
-                        ],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    )
-                )
-                .frame(width: tickWidth, height: tickHeight)
-
-            // Top highlight on tick
-            VStack {
-                RoundedRectangle(cornerRadius: tickWidth / 2)
-                    .fill(Color.white.opacity(tickOpacity * 0.3))
-                    .frame(width: tickWidth, height: 2)
-                Spacer()
-            }
-            .frame(height: tickHeight)
-        }
-        .frame(width: config.tickSpacing, height: config.majorTickHeight + 8)
+        RoundedRectangle(cornerRadius: tickWidth / 2)
+            .fill(style.tickColor.opacity(Double(tickOpacity)))
+            .frame(width: tickWidth, height: tickHeight)
+            .frame(width: style.tickSpacing, height: style.majorTickHeight + 8)
     }
 }
 
-// MARK: - Premium Center Indicator
+// MARK: - Center Indicator
 
-private struct CenterIndicatorPremium: View {
-    let accentColor: Color
+private struct CenterIndicator: View {
+    let style: SteppingWheelStyle
 
     var body: some View {
-        ZStack {
-            // Outer glow
-            RoundedRectangle(cornerRadius: 10)
-                .fill(accentColor.opacity(0.15))
-                .frame(width: 44, height: 48)
-                .blur(radius: 8)
-
-            // Glass container
-            ZStack {
-                // Dark glass background
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(
-                        LinearGradient(
-                            colors: [
-                                Color(white: 0.18),
-                                Color(white: 0.12),
-                                Color(white: 0.08)
-                            ],
-                            startPoint: .top,
-                            endPoint: .bottom
-                        )
-                    )
-
-                // Inner shadow
-                RoundedRectangle(cornerRadius: 8)
-                    .stroke(
-                        LinearGradient(
-                            colors: [
-                                Color.black.opacity(0.6),
-                                Color.clear,
-                                Color.white.opacity(0.1)
-                            ],
-                            startPoint: .top,
-                            endPoint: .bottom
-                        ),
-                        lineWidth: 1.5
-                    )
-
-                // Outer border
-                RoundedRectangle(cornerRadius: 8)
-                    .stroke(
-                        LinearGradient(
-                            colors: [
-                                Color.white.opacity(0.15),
-                                Color.white.opacity(0.05),
-                                Color.black.opacity(0.3)
-                            ],
-                            startPoint: .top,
-                            endPoint: .bottom
-                        ),
-                        lineWidth: 0.5
-                    )
-            }
-            .frame(width: 38, height: 44)
-
-            // Accent line with glow
-            ZStack {
-                // Glow
-                RoundedRectangle(cornerRadius: 1.5)
-                    .fill(accentColor)
-                    .frame(width: 3, height: 26)
-                    .blur(radius: 4)
-                    .opacity(0.6)
-
-                // Main line
-                RoundedRectangle(cornerRadius: 1.5)
-                    .fill(
-                        LinearGradient(
-                            colors: [
-                                accentColor.opacity(0.9),
-                                accentColor,
-                                accentColor.opacity(0.8)
-                            ],
-                            startPoint: .top,
-                            endPoint: .bottom
-                        )
-                    )
-                    .frame(width: 2.5, height: 24)
-
-                // Highlight on line
-                VStack {
-                    RoundedRectangle(cornerRadius: 1)
-                        .fill(Color.white.opacity(0.4))
-                        .frame(width: 1.5, height: 6)
-                    Spacer()
-                }
-                .frame(height: 24)
-            }
+        switch style.centerIndicatorStyle {
+        case .line:
+            lineIndicator
+        case .lineWithGlow:
+            lineWithGlowIndicator
+        case .box:
+            boxIndicator
+        case .triangle:
+            triangleIndicator
+        case .none:
+            EmptyView()
         }
+    }
+
+    private var lineIndicator: some View {
+        RoundedRectangle(cornerRadius: style.centerIndicatorWidth / 2)
+            .fill(style.accentColor)
+            .frame(width: style.centerIndicatorWidth, height: style.centerIndicatorHeight)
+    }
+
+    private var lineWithGlowIndicator: some View {
+        ZStack {
+            // Glow
+            RoundedRectangle(cornerRadius: style.centerIndicatorWidth / 2)
+                .fill(style.accentColor)
+                .frame(width: style.centerIndicatorWidth + 4, height: style.centerIndicatorHeight + 4)
+                .blur(radius: 6)
+                .opacity(0.5)
+
+            // Line
+            RoundedRectangle(cornerRadius: style.centerIndicatorWidth / 2)
+                .fill(style.accentColor)
+                .frame(width: style.centerIndicatorWidth, height: style.centerIndicatorHeight)
+        }
+    }
+
+    private var boxIndicator: some View {
+        RoundedRectangle(cornerRadius: 4)
+            .stroke(style.accentColor, lineWidth: 1.5)
+            .frame(width: style.centerIndicatorWidth * 10, height: style.centerIndicatorHeight)
+    }
+
+    private var triangleIndicator: some View {
+        VStack(spacing: 0) {
+            Triangle()
+                .fill(style.accentColor)
+                .frame(width: 8, height: 6)
+
+            Spacer()
+
+            Triangle()
+                .fill(style.accentColor)
+                .frame(width: 8, height: 6)
+                .rotationEffect(.degrees(180))
+        }
+        .frame(height: style.centerIndicatorHeight)
+    }
+}
+
+// MARK: - Triangle Shape
+
+private struct Triangle: Shape {
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        path.move(to: CGPoint(x: rect.midX, y: rect.maxY))
+        path.addLine(to: CGPoint(x: rect.minX, y: rect.minY))
+        path.addLine(to: CGPoint(x: rect.maxX, y: rect.minY))
+        path.closeSubpath()
+        return path
     }
 }
 
