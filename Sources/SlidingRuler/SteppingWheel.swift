@@ -413,7 +413,7 @@ private struct TickView<V: BinaryFloatingPoint>: View {
             // Value label (only if enabled and at interval)
             if config.showLabels && index % config.labelInterval == 0 {
                 Text("\(Int(value))")
-                    .font(.caption2)
+                    .font(.system(size: 10))
                     .foregroundColor(.secondary.opacity(tickOpacity))
             }
         }
