@@ -26,83 +26,43 @@ public struct SteppingWheelStyle {
 
     // MARK: - Tick Appearance
 
-    /// Color of tick marks
     public var tickColor: Color
-
-    /// Width of minor ticks
     public var minorTickWidth: CGFloat
-
-    /// Width of major ticks
     public var majorTickWidth: CGFloat
-
-    /// Height of minor ticks
     public var minorTickHeight: CGFloat
-
-    /// Height of major ticks
     public var majorTickHeight: CGFloat
-
-    /// Interval for major ticks (e.g., every 5th tick)
     public var majorTickInterval: Int
-
-    /// Whether ticks fade towards edges
     public var tickFadeEnabled: Bool
-
-    /// Opacity of ticks at center (1.0 = full)
     public var tickCenterOpacity: CGFloat
-
-    /// Opacity of ticks at edges (0.0 = invisible)
     public var tickEdgeOpacity: CGFloat
 
     // MARK: - Center Indicator
 
-    /// Whether to show the center indicator
     public var showCenterIndicator: Bool
-
-    /// Style of center indicator
     public var centerIndicatorStyle: CenterIndicatorStyle
-
-    /// Accent color for center indicator
     public var accentColor: Color
-
-    /// Width of center indicator line
     public var centerIndicatorWidth: CGFloat
-
-    /// Height of center indicator
     public var centerIndicatorHeight: CGFloat
 
     // MARK: - Background
 
-    /// Background color (nil = transparent)
     public var backgroundColor: Color?
-
-    /// Whether to show edge fade gradients
     public var showEdgeFade: Bool
-
-    /// Color for edge fade (usually matches parent background)
     public var edgeFadeColor: Color
-
-    /// Width of edge fade gradient
     public var edgeFadeWidth: CGFloat
 
     // MARK: - Layout
 
-    /// Spacing between tick marks
     public var tickSpacing: CGFloat
-
-    /// Total height of the control
     public var height: CGFloat
 
-    // MARK: - Center Indicator Styles
-
     public enum CenterIndicatorStyle {
-        case line           // Simple colored line
-        case lineWithGlow   // Line with subtle glow
-        case box            // Rounded rectangle box
-        case triangle       // Triangle pointer
-        case none           // No indicator (just use tick highlight)
+        case line
+        case lineWithGlow
+        case box
+        case triangle
+        case none
     }
-
-    // MARK: - Initializer
 
     public init(
         tickColor: Color = .white,
@@ -148,9 +108,8 @@ public struct SteppingWheelStyle {
         self.height = height
     }
 
-    // MARK: - Preset Styles
+    // MARK: - Presets
 
-    /// Minimal clean style - simple white ticks on transparent background
     public static let minimal = SteppingWheelStyle(
         tickColor: .white,
         minorTickWidth: 1,
@@ -167,17 +126,15 @@ public struct SteppingWheelStyle {
         centerIndicatorWidth: 2,
         centerIndicatorHeight: 24,
         backgroundColor: nil,
-        showEdgeFade: true,
+        showEdgeFade: false,
         edgeFadeColor: .black,
-        edgeFadeWidth: 40,
+        edgeFadeWidth: 0,
         tickSpacing: 10,
         height: 40
     )
 
-    /// Default balanced style
     public static let `default` = SteppingWheelStyle()
 
-    /// Pro style with accent glow
     public static func pro(accent: Color) -> SteppingWheelStyle {
         SteppingWheelStyle(
             tickColor: .white,
@@ -203,7 +160,6 @@ public struct SteppingWheelStyle {
         )
     }
 
-    /// Compact style for tight spaces
     public static let compact = SteppingWheelStyle(
         tickColor: .white,
         minorTickWidth: 1,
@@ -220,15 +176,15 @@ public struct SteppingWheelStyle {
         centerIndicatorWidth: 1.5,
         centerIndicatorHeight: 16,
         backgroundColor: nil,
-        showEdgeFade: true,
+        showEdgeFade: false,
         edgeFadeColor: .black,
-        edgeFadeWidth: 30,
+        edgeFadeWidth: 0,
         tickSpacing: 8,
         height: 32
     )
 }
 
-// MARK: - Legacy Config (for backward compatibility)
+// MARK: - Legacy Config (backward compatibility)
 
 public struct SteppingWheelConfig {
     public var tickSpacing: CGFloat
@@ -262,7 +218,6 @@ public struct SteppingWheelConfig {
 
     public static let `default` = SteppingWheelConfig()
 
-    /// Convert to new style system
     func toStyle() -> SteppingWheelStyle {
         SteppingWheelStyle(
             tickColor: .white,
@@ -270,28 +225,56 @@ public struct SteppingWheelConfig {
             majorTickHeight: majorTickHeight,
             majorTickInterval: majorTickInterval,
             accentColor: accentColor,
+            showEdgeFade: false,
             tickSpacing: tickSpacing,
             height: height
         )
     }
 }
 
-// MARK: - Tick Context (passed to custom tick views)
+// MARK: - SteppingWheel View (Canvas-based for performance)
 
-public struct SteppingWheelTickContext {
-    public let index: Int
-    public let isMajor: Bool
-    public let distanceFromCenter: CGFloat  // 0 = center, 1 = edge
-    public let tickSpacing: CGFloat
-}
+@available(iOS 15.0, *)
+public struct SteppingWheel<V>: View where V: BinaryFloatingPoint, V.Stride: BinaryFloatingPoint {
 
-// MARK: - Convenience Initializers (default tick/indicator)
+    @Binding private var value: V
+    private let bounds: ClosedRange<V>
+    private let step: V.Stride
+    private let onStep: ((V) -> Void)?
+    private let onEditingChanged: ((Bool) -> Void)?
+    private let style: SteppingWheelStyle
 
-@available(iOS 13.0, *)
-public extension SteppingWheel where TickContent == EmptyView, IndicatorContent == EmptyView {
+    @State private var state: SteppingWheelState = .idle
+    @State private var dragStartValue: V = 0
+    @State private var dragOffset: CGFloat = 0
+    @State private var previousStepIndex: Int = 0
+    @State private var animationTimer: VSynchedTimer?
+    @State private var velocity: CGFloat = 0
 
-    /// Simple initializer using built-in tick and indicator styles
-    init(
+    // MARK: - Computed
+
+    private var currentStepIndex: Int {
+        Int(((value - bounds.lowerBound) / V(step)).rounded())
+    }
+
+    private var stepCount: Int {
+        Int((bounds.upperBound - bounds.lowerBound) / V(step)) + 1
+    }
+
+    private var snappedValue: V {
+        let stepIndex = ((value - bounds.lowerBound) / V(step)).rounded()
+        let snapped = bounds.lowerBound + V(stepIndex) * V(step)
+        return min(max(snapped, bounds.lowerBound), bounds.upperBound)
+    }
+
+    private var renderOffset: CGFloat {
+        let stepIndex = (value - bounds.lowerBound) / V(step)
+        return -CGFloat(stepIndex) * style.tickSpacing
+    }
+
+    // MARK: - Init
+
+    public init(
         value: Binding<V>,
         in bounds: ClosedRange<V>,
         step: V.Stride = 1,
@@ -305,12 +288,9 @@ public extension SteppingWheel where TickContent == EmptyView, IndicatorContent 
         self.style = style
         self.onStep = onStep
         self.onEditingChanged = onEditingChanged
-        self.customTick = nil
-        self.customIndicator = nil
     }
 
-    /// Legacy config-based initializer (backward compatible)
-    init(
+    public init(
         value: Binding<V>,
         in bounds: ClosedRange<V>,
         step: V.Stride = 1,
@@ -324,200 +304,32 @@ public extension SteppingWheel where TickContent == EmptyView, IndicatorContent 
         self.style = config.toStyle()
         self.onStep = onStep
         self.onEditingChanged = onEditingChanged
-        self.customTick = nil
-        self.customIndicator = nil
-    }
-}
-
-// MARK: - Convenience Initializers (custom tick only)
-
-@available(iOS 13.0, *)
-public extension SteppingWheel where IndicatorContent == EmptyView {
-
-    /// Initializer with custom tick view, default indicator
-    init(
-        value: Binding<V>,
-        in bounds: ClosedRange<V>,
-        step: V.Stride = 1,
-        style: SteppingWheelStyle = .default,
-        onStep: ((V) -> Void)? = nil,
-        onEditingChanged: ((Bool) -> Void)? = nil,
-        @ViewBuilder tick: @escaping (SteppingWheelTickContext) -> TickContent
-    ) {
-        self._value = value
-        self.bounds = bounds
-        self.step = step
-        self.style = style
-        self.onStep = onStep
-        self.onEditingChanged = onEditingChanged
-        self.customTick = tick
-        self.customIndicator = nil
-    }
-}
-
-// MARK: - Convenience Initializers (custom indicator only)
-
-@available(iOS 13.0, *)
-public extension SteppingWheel where TickContent == EmptyView {
-
-    /// Initializer with custom indicator view, default ticks
-    init(
-        value: Binding<V>,
-        in bounds: ClosedRange<V>,
-        step: V.Stride = 1,
-        style: SteppingWheelStyle = .default,
-        onStep: ((V) -> Void)? = nil,
-        onEditingChanged: ((Bool) -> Void)? = nil,
-        @ViewBuilder indicator: @escaping () -> IndicatorContent
-    ) {
-        self._value = value
-        self.bounds = bounds
-        self.step = step
-        self.style = style
-        self.onStep = onStep
-        self.onEditingChanged = onEditingChanged
-        self.customTick = nil
-        self.customIndicator = indicator
-    }
-}
-
-// MARK: - SteppingWheel View
-
-@available(iOS 13.0, *)
-public struct SteppingWheel<V, TickContent: View, IndicatorContent: View>: View where V: BinaryFloatingPoint, V.Stride: BinaryFloatingPoint {
-
-    // MARK: - Configuration
-
-    @Binding private var value: V
-    private let bounds: ClosedRange<V>
-    private let step: V.Stride
-    private let onStep: ((V) -> Void)?
-    private let onEditingChanged: ((Bool) -> Void)?
-    private let style: SteppingWheelStyle
-    private let customTick: ((SteppingWheelTickContext) -> TickContent)?
-    private let customIndicator: (() -> IndicatorContent)?
-
-    // MARK: - Internal State
-
-    @State private var controlWidth: CGFloat = 0
-    @State private var state: SteppingWheelState = .idle
-    @State private var dragStartValue: V = 0
-    @State private var dragOffset: CGFloat = 0
-    @State private var previousStepIndex: Int = 0
-    @State private var animationTimer: VSynchedTimer?
-    @State private var velocity: CGFloat = 0
-
-    // MARK: - Computed Properties
-
-    private var currentStepIndex: Int {
-        Int(((value - bounds.lowerBound) / V(step)).rounded())
-    }
-
-    private var stepCount: Int {
-        Int((bounds.upperBound - bounds.lowerBound) / V(step)) + 1
-    }
-
-    private var snappedValue: V {
-        let stepIndex = ((value - bounds.lowerBound) / V(step)).rounded()
-        let snapped = bounds.lowerBound + V(stepIndex) * V(step)
-        return snapped.clamped(to: bounds)
-    }
-
-    private var renderOffset: CGFloat {
-        let stepIndex = (value - bounds.lowerBound) / V(step)
-        return -CGFloat(stepIndex) * style.tickSpacing
-    }
-
-    // MARK: - Initializers
-
-    /// Full customization initializer with custom tick and indicator views
-    public init(
-        value: Binding<V>,
-        in bounds: ClosedRange<V>,
-        step: V.Stride = 1,
-        style: SteppingWheelStyle = .default,
-        onStep: ((V) -> Void)? = nil,
-        onEditingChanged: ((Bool) -> Void)? = nil,
-        @ViewBuilder tick: @escaping (SteppingWheelTickContext) -> TickContent,
-        @ViewBuilder indicator: @escaping () -> IndicatorContent
-    ) {
-        self._value = value
-        self.bounds = bounds
-        self.step = step
-        self.style = style
-        self.onStep = onStep
-        self.onEditingChanged = onEditingChanged
-        self.customTick = tick
-        self.customIndicator = indicator
     }
 
     // MARK: - Body
 
     public var body: some View {
         GeometryReader { geometry in
-            ZStack(alignment: .center) {
+            ZStack {
                 // Background
                 if let bgColor = style.backgroundColor {
                     bgColor
                 }
 
-                // Tick marks layer
-                HStack(spacing: 0) {
-                    ForEach(0..<stepCount, id: \.self) { index in
-                        let context = SteppingWheelTickContext(
-                            index: index,
-                            isMajor: index % style.majorTickInterval == 0,
-                            distanceFromCenter: distanceFromCenter(index: index, width: geometry.size.width),
-                            tickSpacing: style.tickSpacing
-                        )
+                // Canvas-based ticks (high performance)
+                ticksCanvas(size: geometry.size)
 
-                        if let customTick = customTick {
-                            customTick(context)
-                                .frame(width: style.tickSpacing)
-                        } else {
-                            TickView(
-                                index: index,
-                                distanceFromCenter: context.distanceFromCenter,
-                                style: style
-                            )
-                        }
-                    }
-                }
-                .offset(x: effectiveOffset(in: geometry.size.width))
-
-                // Edge fade overlays
+                // Edge fades
                 if style.showEdgeFade {
-                    HStack {
-                        LinearGradient(
-                            colors: [style.edgeFadeColor, style.edgeFadeColor.opacity(0)],
-                            startPoint: .leading,
-                            endPoint: .trailing
-                        )
-                        .frame(width: style.edgeFadeWidth)
-
-                        Spacer()
-
-                        LinearGradient(
-                            colors: [style.edgeFadeColor.opacity(0), style.edgeFadeColor],
-                            startPoint: .leading,
-                            endPoint: .trailing
-                        )
-                        .frame(width: style.edgeFadeWidth)
-                    }
+                    edgeFadeOverlay
                 }
 
-                // Center indicator
-                if let customIndicator = customIndicator {
-                    customIndicator()
-                } else if style.showCenterIndicator {
-                    CenterIndicator(style: style)
+                // Center indicator (overlay, not in canvas for flexibility)
+                if style.showCenterIndicator {
+                    centerIndicator
                 }
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
             .clipped()
-            .onAppear {
-                controlWidth = geometry.size.width
-            }
         }
         .frame(height: style.height)
         .contentShape(Rectangle())
@@ -528,28 +340,132 @@ public struct SteppingWheel<V, TickContent: View, IndicatorContent: View>: View 
         )
     }
 
-    // MARK: - Distance Calculation
+    // MARK: - Canvas Rendering (Performance Optimized)
 
-    private func distanceFromCenter(index: Int, width: CGFloat) -> CGFloat {
-        let centerIndex = currentStepIndex
-        let indexDiff = abs(index - centerIndex)
-        let pixelDistance = CGFloat(indexDiff) * style.tickSpacing
-        let maxDistance = width / 2
-        return min(pixelDistance / maxDistance, 1.0)
+    private func ticksCanvas(size: CGSize) -> some View {
+        Canvas { context, canvasSize in
+            let centerX = canvasSize.width / 2
+            let centerY = canvasSize.height / 2
+
+            // Calculate current offset
+            let offset: CGFloat
+            switch state {
+            case .idle:
+                offset = renderOffset
+            case .dragging, .decelerating:
+                let stepIndex = (dragStartValue - bounds.lowerBound) / V(step)
+                let baseOffset = -CGFloat(stepIndex) * style.tickSpacing
+                offset = baseOffset + dragOffset
+            }
+
+            // Calculate visible tick range (only draw what's on screen)
+            let ticksOnScreen = Int(canvasSize.width / style.tickSpacing) + 4
+            let centerTickIndex = Int(-offset / style.tickSpacing)
+            let startTick = max(0, centerTickIndex - ticksOnScreen / 2)
+            let endTick = min(stepCount - 1, centerTickIndex + ticksOnScreen / 2)
+
+            // Draw only visible ticks
+            for i in startTick...endTick {
+                let tickX = centerX + offset + CGFloat(i) * style.tickSpacing
+
+                // Skip if off-screen
+                guard tickX > -style.tickSpacing && tickX < canvasSize.width + style.tickSpacing else {
+                    continue
+                }
+
+                let isMajor = i % style.majorTickInterval == 0
+                let tickWidth = isMajor ? style.majorTickWidth : style.minorTickWidth
+                let tickHeight = isMajor ? style.majorTickHeight : style.minorTickHeight
+
+                // Calculate opacity based on distance from center
+                let distanceFromCenter = abs(tickX - centerX) / (canvasSize.width / 2)
+                let opacity: CGFloat
+                if style.tickFadeEnabled {
+                    let range = style.tickCenterOpacity - style.tickEdgeOpacity
+                    opacity = style.tickCenterOpacity - (min(distanceFromCenter, 1.0) * range)
+                } else {
+                    opacity = style.tickCenterOpacity
+                }
+
+                // Draw tick
+                let tickRect = CGRect(
+                    x: tickX - tickWidth / 2,
+                    y: centerY - tickHeight / 2,
+                    width: tickWidth,
+                    height: tickHeight
+                )
+
+                let tickPath = Path(roundedRect: tickRect, cornerRadius: tickWidth / 2)
+                context.fill(tickPath, with: .color(style.tickColor.opacity(opacity)))
+            }
+        }
     }
 
-    // MARK: - Offset Calculation
+    // MARK: - Edge Fade Overlay
 
-    private func effectiveOffset(in width: CGFloat) -> CGFloat {
-        let centerOffset = width / 2 - style.tickSpacing / 2
+    private var edgeFadeOverlay: some View {
+        HStack {
+            LinearGradient(
+                colors: [style.edgeFadeColor, style.edgeFadeColor.opacity(0)],
+                startPoint: .leading,
+                endPoint: .trailing
+            )
+            .frame(width: style.edgeFadeWidth)
 
-        switch state {
-        case .idle:
-            return centerOffset + renderOffset
-        case .dragging, .decelerating:
-            let stepIndex = (dragStartValue - bounds.lowerBound) / V(step)
-            let baseOffset = -CGFloat(stepIndex) * style.tickSpacing
-            return centerOffset + baseOffset + dragOffset
+            Spacer()
+
+            LinearGradient(
+                colors: [style.edgeFadeColor.opacity(0), style.edgeFadeColor],
+                startPoint: .leading,
+                endPoint: .trailing
+            )
+            .frame(width: style.edgeFadeWidth)
+        }
+    }
+
+    // MARK: - Center Indicator
+
+    @ViewBuilder
+    private var centerIndicator: some View {
+        switch style.centerIndicatorStyle {
+        case .line:
+            RoundedRectangle(cornerRadius: style.centerIndicatorWidth / 2)
+                .fill(style.accentColor)
+                .frame(width: style.centerIndicatorWidth, height: style.centerIndicatorHeight)
+
+        case .lineWithGlow:
+            ZStack {
+                RoundedRectangle(cornerRadius: style.centerIndicatorWidth / 2)
+                    .fill(style.accentColor)
+                    .frame(width: style.centerIndicatorWidth + 4, height: style.centerIndicatorHeight + 4)
+                    .blur(radius: 6)
+                    .opacity(0.5)
+
+                RoundedRectangle(cornerRadius: style.centerIndicatorWidth / 2)
+                    .fill(style.accentColor)
+                    .frame(width: style.centerIndicatorWidth, height: style.centerIndicatorHeight)
+            }
+
+        case .box:
+            RoundedRectangle(cornerRadius: 4)
+                .stroke(style.accentColor, lineWidth: 1.5)
+                .frame(width: style.centerIndicatorWidth * 10, height: style.centerIndicatorHeight)
+
+        case .triangle:
+            VStack(spacing: 0) {
+                Triangle()
+                    .fill(style.accentColor)
+                    .frame(width: 8, height: 6)
+                Spacer()
+                Triangle()
+                    .fill(style.accentColor)
+                    .frame(width: 8, height: 6)
+                    .rotationEffect(.degrees(180))
+            }
+            .frame(height: style.centerIndicatorHeight)
+
+        case .none:
+            EmptyView()
         }
     }
 
@@ -605,6 +521,7 @@ public struct SteppingWheel<V, TickContent: View, IndicatorContent: View>: View 
         let maxOffsetLeft = CGFloat(startStepIndex) * style.tickSpacing
         let maxOffsetRight = -CGFloat(stepCount - 1 - startStepIndex) * style.tickSpacing
 
+        // Rubber band at edges
         let clampedOffset: CGFloat
         if rawOffset > maxOffsetLeft {
             let overflow = rawOffset - maxOffsetLeft
@@ -618,8 +535,7 @@ public struct SteppingWheel<V, TickContent: View, IndicatorContent: View>: View 
 
         dragOffset = clampedOffset
 
-        let totalOffset = rawOffset
-        let stepsDelta = Int((-totalOffset / style.tickSpacing).rounded())
+        let stepsDelta = Int((-rawOffset / style.tickSpacing).rounded())
         let newStepIndex = startStepIndex + stepsDelta
         let clampedIndex = max(0, min(stepCount - 1, newStepIndex))
 
@@ -683,7 +599,7 @@ public struct SteppingWheel<V, TickContent: View, IndicatorContent: View>: View 
         })
     }
 
-    // MARK: - Inertia Physics
+    // MARK: - Inertia
 
     private func applyInertia(velocity: CGFloat) {
         state = .decelerating
@@ -789,107 +705,6 @@ public struct SteppingWheel<V, TickContent: View, IndicatorContent: View>: View 
     }
 }
 
-// MARK: - Tick View
-
-private struct TickView: View {
-    let index: Int
-    let distanceFromCenter: CGFloat
-    let style: SteppingWheelStyle
-
-    private var isMajor: Bool {
-        index % style.majorTickInterval == 0
-    }
-
-    private var tickHeight: CGFloat {
-        isMajor ? style.majorTickHeight : style.minorTickHeight
-    }
-
-    private var tickWidth: CGFloat {
-        isMajor ? style.majorTickWidth : style.minorTickWidth
-    }
-
-    private var tickOpacity: CGFloat {
-        guard style.tickFadeEnabled else {
-            return style.tickCenterOpacity
-        }
-
-        let range = style.tickCenterOpacity - style.tickEdgeOpacity
-        return style.tickCenterOpacity - (distanceFromCenter * range)
-    }
-
-    var body: some View {
-        RoundedRectangle(cornerRadius: tickWidth / 2)
-            .fill(style.tickColor.opacity(Double(tickOpacity)))
-            .frame(width: tickWidth, height: tickHeight)
-            .frame(width: style.tickSpacing, height: style.majorTickHeight + 8)
-    }
-}
-
-// MARK: - Center Indicator
-
-private struct CenterIndicator: View {
-    let style: SteppingWheelStyle
-
-    var body: some View {
-        switch style.centerIndicatorStyle {
-        case .line:
-            lineIndicator
-        case .lineWithGlow:
-            lineWithGlowIndicator
-        case .box:
-            boxIndicator
-        case .triangle:
-            triangleIndicator
-        case .none:
-            EmptyView()
-        }
-    }
-
-    private var lineIndicator: some View {
-        RoundedRectangle(cornerRadius: style.centerIndicatorWidth / 2)
-            .fill(style.accentColor)
-            .frame(width: style.centerIndicatorWidth, height: style.centerIndicatorHeight)
-    }
-
-    private var lineWithGlowIndicator: some View {
-        ZStack {
-            // Glow
-            RoundedRectangle(cornerRadius: style.centerIndicatorWidth / 2)
-                .fill(style.accentColor)
-                .frame(width: style.centerIndicatorWidth + 4, height: style.centerIndicatorHeight + 4)
-                .blur(radius: 6)
-                .opacity(0.5)
-
-            // Line
-            RoundedRectangle(cornerRadius: style.centerIndicatorWidth / 2)
-                .fill(style.accentColor)
-                .frame(width: style.centerIndicatorWidth, height: style.centerIndicatorHeight)
-        }
-    }
-
-    private var boxIndicator: some View {
-        RoundedRectangle(cornerRadius: 4)
-            .stroke(style.accentColor, lineWidth: 1.5)
-            .frame(width: style.centerIndicatorWidth * 10, height: style.centerIndicatorHeight)
-    }
-
-    private var triangleIndicator: some View {
-        VStack(spacing: 0) {
-            Triangle()
-                .fill(style.accentColor)
-                .frame(width: 8, height: 6)
-
-            Spacer()
-
-            Triangle()
-                .fill(style.accentColor)
-                .frame(width: 8, height: 6)
-                .rotationEffect(.degrees(180))
-        }
-        .frame(height: style.centerIndicatorHeight)
-    }
-}
-
 // MARK: - Triangle Shape
 
 private struct Triangle: Shape {
@@ -900,13 +715,5 @@ private struct Triangle: Shape {
         path.addLine(to: CGPoint(x: rect.maxX, y: rect.minY))
         path.closeSubpath()
         return path
-    }
-}
-
-// MARK: - Clamped Extension
-
-private extension BinaryFloatingPoint {
-    func clamped(to range: ClosedRange<Self>) -> Self {
-        return Swift.min(Swift.max(self, range.lowerBound), range.upperBound)
     }
 }
