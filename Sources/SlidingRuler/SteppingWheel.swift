@@ -276,10 +276,115 @@ public struct SteppingWheelConfig {
     }
 }
 
+// MARK: - Tick Context (passed to custom tick views)
+
+public struct SteppingWheelTickContext {
+    public let index: Int
+    public let isMajor: Bool
+    public let distanceFromCenter: CGFloat  // 0 = center, 1 = edge
+    public let tickSpacing: CGFloat
+}
+
+// MARK: - Convenience Initializers (default tick/indicator)
+
+@available(iOS 13.0, *)
+public extension SteppingWheel where TickContent == EmptyView, IndicatorContent == EmptyView {
+
+    /// Simple initializer using built-in tick and indicator styles
+    init(
+        value: Binding<V>,
+        in bounds: ClosedRange<V>,
+        step: V.Stride = 1,
+        style: SteppingWheelStyle = .default,
+        onStep: ((V) -> Void)? = nil,
+        onEditingChanged: ((Bool) -> Void)? = nil
+    ) {
+        self._value = value
+        self.bounds = bounds
+        self.step = step
+        self.style = style
+        self.onStep = onStep
+        self.onEditingChanged = onEditingChanged
+        self.customTick = nil
+        self.customIndicator = nil
+    }
+
+    /// Legacy config-based initializer (backward compatible)
+    init(
+        value: Binding<V>,
+        in bounds: ClosedRange<V>,
+        step: V.Stride = 1,
+        config: SteppingWheelConfig,
+        onStep: ((V) -> Void)? = nil,
+        onEditingChanged: ((Bool) -> Void)? = nil
+    ) {
+        self._value = value
+        self.bounds = bounds
+        self.step = step
+        self.style = config.toStyle()
+        self.onStep = onStep
+        self.onEditingChanged = onEditingChanged
+        self.customTick = nil
+        self.customIndicator = nil
+    }
+}
+
+// MARK: - Convenience Initializers (custom tick only)
+
+@available(iOS 13.0, *)
+public extension SteppingWheel where IndicatorContent == EmptyView {
+
+    /// Initializer with custom tick view, default indicator
+    init(
+        value: Binding<V>,
+        in bounds: ClosedRange<V>,
+        step: V.Stride = 1,
+        style: SteppingWheelStyle = .default,
+        onStep: ((V) -> Void)? = nil,
+        onEditingChanged: ((Bool) -> Void)? = nil,
+        @ViewBuilder tick: @escaping (SteppingWheelTickContext) -> TickContent
+    ) {
+        self._value = value
+        self.bounds = bounds
+        self.step = step
+        self.style = style
+        self.onStep = onStep
+        self.onEditingChanged = onEditingChanged
+        self.customTick = tick
+        self.customIndicator = nil
+    }
+}
+
+// MARK: - Convenience Initializers (custom indicator only)
+
+@available(iOS 13.0, *)
+public extension SteppingWheel where TickContent == EmptyView {
+
+    /// Initializer with custom indicator view, default ticks
+    init(
+        value: Binding<V>,
+        in bounds: ClosedRange<V>,
+        step: V.Stride = 1,
+        style: SteppingWheelStyle = .default,
+        onStep: ((V) -> Void)? = nil,
+        onEditingChanged: ((Bool) -> Void)? = nil,
+        @ViewBuilder indicator: @escaping () -> IndicatorContent
+    ) {
+        self._value = value
+        self.bounds = bounds
+        self.step = step
+        self.style = style
+        self.onStep = onStep
+        self.onEditingChanged = onEditingChanged
+        self.customTick = nil
+        self.customIndicator = indicator
+    }
+}
+
 // MARK: - SteppingWheel View
 
 @available(iOS 13.0, *)
-public struct SteppingWheel<V>: View where V: BinaryFloatingPoint, V.Stride: BinaryFloatingPoint {
+public struct SteppingWheel<V, TickContent: View, IndicatorContent: View>: View where V: BinaryFloatingPoint, V.Stride: BinaryFloatingPoint {
 
     // MARK: - Configuration
 
@@ -289,6 +394,8 @@ public struct SteppingWheel<V>: View where V: BinaryFloatingPoint, V.Stride: Bin
     private let onStep: ((V) -> Void)?
     private let onEditingChanged: ((Bool) -> Void)?
     private let style: SteppingWheelStyle
+    private let customTick: ((SteppingWheelTickContext) -> TickContent)?
+    private let customIndicator: (() -> IndicatorContent)?
 
     // MARK: - Internal State
 
@@ -323,14 +430,16 @@ public struct SteppingWheel<V>: View where V: BinaryFloatingPoint, V.Stride: Bin
 
     // MARK: - Initializers
 
-    /// New style-based initializer
+    /// Full customization initializer with custom tick and indicator views
     public init(
         value: Binding<V>,
         in bounds: ClosedRange<V>,
         step: V.Stride = 1,
         style: SteppingWheelStyle = .default,
         onStep: ((V) -> Void)? = nil,
-        onEditingChanged: ((Bool) -> Void)? = nil
+        onEditingChanged: ((Bool) -> Void)? = nil,
+        @ViewBuilder tick: @escaping (SteppingWheelTickContext) -> TickContent,
+        @ViewBuilder indicator: @escaping () -> IndicatorContent
     ) {
         self._value = value
         self.bounds = bounds
@@ -338,23 +447,8 @@ public struct SteppingWheel<V>: View where V: BinaryFloatingPoint, V.Stride: Bin
         self.style = style
         self.onStep = onStep
         self.onEditingChanged = onEditingChanged
-    }
-
-    /// Legacy config-based initializer (backward compatible)
-    public init(
-        value: Binding<V>,
-        in bounds: ClosedRange<V>,
-        step: V.Stride = 1,
-        config: SteppingWheelConfig,
-        onStep: ((V) -> Void)? = nil,
-        onEditingChanged: ((Bool) -> Void)? = nil
-    ) {
-        self._value = value
-        self.bounds = bounds
-        self.step = step
-        self.style = config.toStyle()
-        self.onStep = onStep
-        self.onEditingChanged = onEditingChanged
+        self.customTick = tick
+        self.customIndicator = indicator
     }
 
     // MARK: - Body
@@ -370,11 +464,23 @@ public struct SteppingWheel<V>: View where V: BinaryFloatingPoint, V.Stride: Bin
                 // Tick marks layer
                 HStack(spacing: 0) {
                     ForEach(0..<stepCount, id: \.self) { index in
-                        TickView(
+                        let context = SteppingWheelTickContext(
                             index: index,
+                            isMajor: index % style.majorTickInterval == 0,
                             distanceFromCenter: distanceFromCenter(index: index, width: geometry.size.width),
-                            style: style
+                            tickSpacing: style.tickSpacing
                         )
+
+                        if let customTick = customTick {
+                            customTick(context)
+                                .frame(width: style.tickSpacing)
+                        } else {
+                            TickView(
+                                index: index,
+                                distanceFromCenter: context.distanceFromCenter,
+                                style: style
+                            )
+                        }
                     }
                 }
                 .offset(x: effectiveOffset(in: geometry.size.width))
@@ -401,7 +507,9 @@ public struct SteppingWheel<V>: View where V: BinaryFloatingPoint, V.Stride: Bin
                 }
 
                 // Center indicator
-                if style.showCenterIndicator {
+                if let customIndicator = customIndicator {
+                    customIndicator()
+                } else if style.showCenterIndicator {
                     CenterIndicator(style: style)
                 }
             }
