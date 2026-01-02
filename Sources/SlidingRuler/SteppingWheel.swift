@@ -482,7 +482,12 @@ public struct SteppingWheel<V>: View where V: BinaryFloatingPoint, V.Stride: Bin
 
     private func handleTouchEnded() {
         if state == .dragging {
-            state = .idle
+            var transaction = Transaction()
+            transaction.disablesAnimations = true
+            withTransaction(transaction) {
+                state = .idle
+                dragOffset = 0
+            }
             snapToNearestStep()
             onEditingChanged?(false)
         }
@@ -578,10 +583,14 @@ public struct SteppingWheel<V>: View where V: BinaryFloatingPoint, V.Stride: Bin
             // Only animate snap-back if we're past boundaries
             animateSnapBack()
         } else {
-            // Normal release - just finalize immediately
-            state = .idle
-            dragOffset = 0
-            snapToNearestStep()
+            // Normal release - transition to idle without animation
+            // Use transaction to prevent any implicit animations during state change
+            var transaction = Transaction()
+            transaction.disablesAnimations = true
+            withTransaction(transaction) {
+                state = .idle
+                dragOffset = 0
+            }
             onEditingChanged?(false)
         }
     }
