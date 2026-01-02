@@ -10,7 +10,7 @@
 
 **Phase**: Beta Development (v0.2.0)
 **Status**: In Progress
-**Current Focus**: Stabilization and missing features
+**Current Focus**: SteppingWheel component development
 
 ---
 
@@ -36,10 +36,12 @@
 | Custom styling | Complete | SlidingRulerStyle protocol |
 | Inertia & rubber banding | Complete | |
 | Pointer interactions | Complete | iPad support |
+| **SteppingWheel component** | Complete | Canvas-based discrete stepper |
+| **SteppingWheelStyle** | Complete | Comprehensive visual customization |
 | Accessibility support | Not Started | Required for v1.0 |
 | RTL layout support | Not Started | Required for v1.0 |
 
-**Progress**: ██████░░░░ 60%
+**Progress**: ███████░░░ 75%
 
 ---
 
@@ -64,6 +66,9 @@
 - [x] Custom styling
 - [x] Animations
 - [x] Pointer interactions
+- [x] **SteppingWheel** (discrete step control)
+- [x] **SteppingWheelStyle** (visual customization)
+- [x] **Canvas-based rendering** (performance optimization)
 - [ ] Layout direction (RTL)
 - [ ] Accessibility
 
@@ -72,8 +77,12 @@
 ## Recent Updates
 
 ### 2026-01-02
+- **SteppingWheel component**: New discrete step wheel for frame-by-frame navigation
+- **SteppingWheelStyle**: Comprehensive visual customization system with presets
+- **Canvas-based rendering**: Performance optimization for 50,000+ steps
+- **Inertia physics**: Friction-based deceleration with boundary handling
+- **Bug fix**: Visual jump when releasing slow drag (Transaction-based fix)
 - Project documentation structure initialized
-- Created project_spec.md, architecture.md, changelog.md, project_status.md
 
 ### Previous
 - Fixed environment value access outside of View installation

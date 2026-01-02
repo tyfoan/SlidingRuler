@@ -9,7 +9,22 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Added
+- **SteppingWheel**: New discrete step wheel control for frame-by-frame navigation
+  - Canvas-based rendering optimized for 50,000+ steps (long video support)
+  - Only renders visible ticks for O(visible) performance instead of O(total)
+  - Inertia physics with friction-based deceleration
+  - Rubber-band effect at boundaries
+  - Haptic feedback on step changes
+- **SteppingWheelStyle**: Comprehensive visual customization system
+  - Tick appearance (color, size, spacing, fade effects)
+  - Center indicator styles (line, lineWithGlow, box, triangle, none)
+  - Background and edge fade configuration
+  - Built-in presets: `.default`, `.minimal`, `.compact`, `.pro(accent:)`
+- **SteppingWheelConfig**: Legacy configuration for backward compatibility
 - Project documentation structure
+
+### Fixed
+- Visual jump when releasing slow drag on SteppingWheel (using Transaction to disable implicit animations)
 
 ---
 
