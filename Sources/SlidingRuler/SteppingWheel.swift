@@ -258,12 +258,33 @@ public struct SteppingWheel<V>: View where V: BinaryFloatingPoint, V.Stride: Bin
     }
 
     private func dragChanged(_ gesture: HorizontalDragGestureValue) {
-        dragOffset = gesture.translation.width
+        let rawOffset = gesture.translation.width
         velocity = gesture.velocity
 
-        let totalOffset = dragOffset
+        // Calculate boundary limits for the offset
+        let startStepIndex = Int((dragStartValue - bounds.lowerBound) / V(step))
+        let maxOffsetLeft = CGFloat(startStepIndex) * config.tickSpacing  // Can scroll left to index 0
+        let maxOffsetRight = -CGFloat(stepCount - 1 - startStepIndex) * config.tickSpacing  // Can scroll right to last index
+
+        // Clamp offset to valid bounds with rubber-band effect at edges
+        let clampedOffset: CGFloat
+        if rawOffset > maxOffsetLeft {
+            // At start boundary - rubber band
+            let overflow = rawOffset - maxOffsetLeft
+            clampedOffset = maxOffsetLeft + overflow * 0.2
+        } else if rawOffset < maxOffsetRight {
+            // At end boundary - rubber band
+            let overflow = rawOffset - maxOffsetRight
+            clampedOffset = maxOffsetRight + overflow * 0.2
+        } else {
+            clampedOffset = rawOffset
+        }
+
+        dragOffset = clampedOffset
+
+        let totalOffset = rawOffset  // Use raw for step calculation
         let stepsDelta = Int((-totalOffset / config.tickSpacing).rounded())
-        let newStepIndex = Int((dragStartValue - bounds.lowerBound) / V(step)) + stepsDelta
+        let newStepIndex = startStepIndex + stepsDelta
         let clampedIndex = max(0, min(stepCount - 1, newStepIndex))
 
         if clampedIndex != previousStepIndex {
@@ -281,13 +302,56 @@ public struct SteppingWheel<V>: View where V: BinaryFloatingPoint, V.Stride: Bin
     private func dragEnded(_ gesture: HorizontalDragGestureValue) {
         let endVelocity = gesture.velocity
 
-        if abs(endVelocity) > 50 {
+        // Check if we're at a boundary
+        let isAtStartBoundary = currentStepIndex == 0
+        let isAtEndBoundary = currentStepIndex == stepCount - 1
+
+        // Don't apply inertia if at boundary and velocity would push past it
+        let shouldApplyInertia: Bool
+        if isAtStartBoundary && endVelocity > 0 {
+            // At start, trying to go left - no inertia
+            shouldApplyInertia = false
+        } else if isAtEndBoundary && endVelocity < 0 {
+            // At end, trying to go right - no inertia
+            shouldApplyInertia = false
+        } else {
+            shouldApplyInertia = abs(endVelocity) > 50
+        }
+
+        if shouldApplyInertia {
             applyInertia(velocity: endVelocity)
         } else {
+            // Snap back from any rubber-band offset
+            animateSnapBack()
+        }
+    }
+
+    private func animateSnapBack() {
+        let targetOffset: CGFloat = 0
+        let startOffset = dragOffset
+
+        if abs(startOffset) < 1 {
             state = .idle
+            dragOffset = 0
             snapToNearestStep()
             onEditingChanged?(false)
+            return
         }
+
+        state = .decelerating
+        let snapDuration: TimeInterval = 0.25
+
+        animationTimer = VSynchedTimer(duration: snapDuration, animations: { progress, _ in
+            let t = CGFloat(progress / snapDuration)
+            // Ease out cubic
+            let eased = 1 - pow(1 - t, 3)
+            self.dragOffset = startOffset * (1 - eased)
+        }, completion: { _ in
+            self.state = .idle
+            self.dragOffset = 0
+            self.snapToNearestStep()
+            self.onEditingChanged?(false)
+        })
     }
 
     // MARK: - Smooth Inertia Physics
@@ -302,28 +366,46 @@ public struct SteppingWheel<V>: View where V: BinaryFloatingPoint, V.Stride: Bin
         var currentOffset = dragOffset
         let startStepIndex = Int((dragStartValue - bounds.lowerBound) / V(step))
 
+        // Calculate boundary limits for the offset
+        let maxOffsetLeft = CGFloat(startStepIndex) * config.tickSpacing
+        let maxOffsetRight = -CGFloat(stepCount - 1 - startStepIndex) * config.tickSpacing
+
         animationTimer = VSynchedTimer(duration: 3.0, animations: { progress, deltaTime in
             currentVelocity *= friction
 
             let frameOffset = currentVelocity * CGFloat(deltaTime)
             currentOffset += frameOffset
+
+            // Check if we hit boundaries
+            var hitBoundary = false
+            if currentOffset > maxOffsetLeft {
+                currentOffset = maxOffsetLeft
+                currentVelocity = 0
+                hitBoundary = true
+            } else if currentOffset < maxOffsetRight {
+                currentOffset = maxOffsetRight
+                currentVelocity = 0
+                hitBoundary = true
+            }
+
             self.dragOffset = currentOffset
 
             let stepsDelta = Int((-currentOffset / config.tickSpacing).rounded())
-            let currentIndex = max(0, min(stepCount - 1, startStepIndex + stepsDelta))
+            let currentIndex = max(0, min(self.stepCount - 1, startStepIndex + stepsDelta))
 
             if currentIndex != self.previousStepIndex {
                 self.tickHaptic()
                 self.previousStepIndex = currentIndex
 
-                let newValue = bounds.lowerBound + V(currentIndex) * V(step)
+                let newValue = self.bounds.lowerBound + V(currentIndex) * V(self.step)
                 if self.value != newValue {
                     self.value = newValue
                     self.onStep?(newValue)
                 }
             }
 
-            if abs(currentVelocity) < minVelocity {
+            // Stop if velocity too low or hit boundary
+            if abs(currentVelocity) < minVelocity || hitBoundary {
                 self.animationTimer?.cancel()
                 self.finalizeDeceleration()
             }
