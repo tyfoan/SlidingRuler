@@ -557,6 +557,12 @@ public struct SteppingWheel<V>: View where V: BinaryFloatingPoint, V.Stride: Bin
         let isAtStartBoundary = currentStepIndex == 0
         let isAtEndBoundary = currentStepIndex == stepCount - 1
 
+        // Check if we're in rubber-band state (dragged past boundary)
+        let startStepIndex = Int((dragStartValue - bounds.lowerBound) / V(step))
+        let maxOffsetLeft = CGFloat(startStepIndex) * style.tickSpacing
+        let maxOffsetRight = -CGFloat(stepCount - 1 - startStepIndex) * style.tickSpacing
+        let isInRubberBand = dragOffset > maxOffsetLeft || dragOffset < maxOffsetRight
+
         let shouldApplyInertia: Bool
         if isAtStartBoundary && endVelocity > 0 {
             shouldApplyInertia = false
@@ -568,15 +574,38 @@ public struct SteppingWheel<V>: View where V: BinaryFloatingPoint, V.Stride: Bin
 
         if shouldApplyInertia {
             applyInertia(velocity: endVelocity)
-        } else {
+        } else if isInRubberBand {
+            // Only animate snap-back if we're past boundaries
             animateSnapBack()
+        } else {
+            // Normal release - just finalize immediately
+            state = .idle
+            dragOffset = 0
+            snapToNearestStep()
+            onEditingChanged?(false)
         }
     }
 
     private func animateSnapBack() {
-        let startOffset = dragOffset
+        // Animate back from rubber-band state to boundary
+        let startStepIndex = Int((dragStartValue - bounds.lowerBound) / V(step))
+        let maxOffsetLeft = CGFloat(startStepIndex) * style.tickSpacing
+        let maxOffsetRight = -CGFloat(stepCount - 1 - startStepIndex) * style.tickSpacing
 
-        if abs(startOffset) < 1 {
+        // Calculate target offset (clamp to valid range)
+        let targetOffset: CGFloat
+        if dragOffset > maxOffsetLeft {
+            targetOffset = maxOffsetLeft
+        } else if dragOffset < maxOffsetRight {
+            targetOffset = maxOffsetRight
+        } else {
+            targetOffset = dragOffset
+        }
+
+        let startOffset = dragOffset
+        let offsetDelta = targetOffset - startOffset
+
+        if abs(offsetDelta) < 1 {
             state = .idle
             dragOffset = 0
             snapToNearestStep()
@@ -585,12 +614,12 @@ public struct SteppingWheel<V>: View where V: BinaryFloatingPoint, V.Stride: Bin
         }
 
         state = .decelerating
-        let snapDuration: TimeInterval = 0.25
+        let snapDuration: TimeInterval = 0.2
 
         animationTimer = VSynchedTimer(duration: snapDuration, animations: { progress, _ in
             let t = CGFloat(progress / snapDuration)
             let eased = 1 - pow(1 - t, 3)
-            self.dragOffset = startOffset * (1 - eased)
+            self.dragOffset = startOffset + offsetDelta * eased
         }, completion: { _ in
             self.state = .idle
             self.dragOffset = 0
