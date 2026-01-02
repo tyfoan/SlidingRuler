@@ -18,6 +18,50 @@ enum SteppingWheelState {
     case decelerating
 }
 
+/// Configuration for SteppingWheel appearance
+public struct SteppingWheelConfig {
+    /// Spacing between tick marks in points
+    public var tickSpacing: CGFloat
+
+    /// Whether to show value labels
+    public var showLabels: Bool
+
+    /// Show label every N ticks (only when showLabels is true)
+    public var labelInterval: Int
+
+    /// Accent color for the center indicator
+    public var accentColor: Color
+
+    /// Height of the control
+    public var height: CGFloat
+
+    /// Tick height for normal ticks
+    public var tickHeight: CGFloat
+
+    /// Tick height for the selected/center tick
+    public var selectedTickHeight: CGFloat
+
+    public init(
+        tickSpacing: CGFloat = 20,
+        showLabels: Bool = false,
+        labelInterval: Int = 5,
+        accentColor: Color = Color(red: 0.85, green: 0.65, blue: 0.25), // Gold
+        height: CGFloat = 50,
+        tickHeight: CGFloat = 16,
+        selectedTickHeight: CGFloat = 24
+    ) {
+        self.tickSpacing = tickSpacing
+        self.showLabels = showLabels
+        self.labelInterval = labelInterval
+        self.accentColor = accentColor
+        self.height = height
+        self.tickHeight = tickHeight
+        self.selectedTickHeight = selectedTickHeight
+    }
+
+    public static let `default` = SteppingWheelConfig()
+}
+
 /// A discrete stepping wheel control for precise value selection.
 /// Unlike SlidingRuler, this control snaps to discrete steps with no intermediate values.
 @available(iOS 13.0, *)
@@ -40,6 +84,9 @@ public struct SteppingWheel<V>: View where V: BinaryFloatingPoint, V.Stride: Bin
     /// Callback when editing starts/ends
     private let onEditingChanged: ((Bool) -> Void)?
 
+    /// Visual configuration
+    private let config: SteppingWheelConfig
+
     // MARK: - Internal State
 
     @State private var controlWidth: CGFloat = 0
@@ -48,11 +95,9 @@ public struct SteppingWheel<V>: View where V: BinaryFloatingPoint, V.Stride: Bin
     @State private var dragOffset: CGFloat = 0
     @State private var previousStepIndex: Int = 0
     @State private var animationTimer: VSynchedTimer?
+    @State private var velocity: CGFloat = 0
 
     // MARK: - Computed Properties
-
-    /// Width of each step cell in points
-    private let cellWidth: CGFloat = 60
 
     /// Current step index (0-based from lower bound)
     private var currentStepIndex: Int {
@@ -74,7 +119,7 @@ public struct SteppingWheel<V>: View where V: BinaryFloatingPoint, V.Stride: Bin
     /// Offset for rendering based on current value
     private var renderOffset: CGFloat {
         let stepIndex = (value - bounds.lowerBound) / V(step)
-        return -CGFloat(stepIndex) * cellWidth
+        return -CGFloat(stepIndex) * config.tickSpacing
     }
 
     // MARK: - Initialization
@@ -84,18 +129,21 @@ public struct SteppingWheel<V>: View where V: BinaryFloatingPoint, V.Stride: Bin
     ///   - value: Binding to the current value (will be snapped to step multiples)
     ///   - bounds: Finite range of allowed values
     ///   - step: Size of each discrete step
+    ///   - config: Visual configuration
     ///   - onStep: Called when value changes to a new step
     ///   - onEditingChanged: Called when drag begins/ends
     public init(
         value: Binding<V>,
         in bounds: ClosedRange<V>,
         step: V.Stride = 1,
+        config: SteppingWheelConfig = .default,
         onStep: ((V) -> Void)? = nil,
         onEditingChanged: ((Bool) -> Void)? = nil
     ) {
         self._value = value
         self.bounds = bounds
         self.step = step
+        self.config = config
         self.onStep = onStep
         self.onEditingChanged = onEditingChanged
     }
@@ -108,18 +156,19 @@ public struct SteppingWheel<V>: View where V: BinaryFloatingPoint, V.Stride: Bin
                 // Step cells
                 HStack(spacing: 0) {
                     ForEach(0..<stepCount, id: \.self) { index in
-                        StepCell(
+                        TickView(
                             index: index,
                             value: bounds.lowerBound + V(index) * V(step),
                             isSelected: index == currentStepIndex,
-                            cellWidth: cellWidth
+                            distanceFromCenter: distanceFromCenter(index: index, width: geometry.size.width),
+                            config: config
                         )
                     }
                 }
                 .offset(x: effectiveOffset(in: geometry.size.width))
 
-                // Center cursor
-                CursorView()
+                // Center indicator
+                CenterIndicator(accentColor: config.accentColor)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .clipped()
@@ -127,7 +176,7 @@ public struct SteppingWheel<V>: View where V: BinaryFloatingPoint, V.Stride: Bin
                 controlWidth = geometry.size.width
             }
         }
-        .frame(height: 60)
+        .frame(height: config.height)
         .contentShape(Rectangle())
         .onHorizontalDragGesture(
             initialTouch: handleTouchBegan,
@@ -136,17 +185,27 @@ public struct SteppingWheel<V>: View where V: BinaryFloatingPoint, V.Stride: Bin
         )
     }
 
+    // MARK: - Distance Calculation
+
+    private func distanceFromCenter(index: Int, width: CGFloat) -> CGFloat {
+        let centerIndex = currentStepIndex
+        let indexDiff = abs(index - centerIndex)
+        let pixelDistance = CGFloat(indexDiff) * config.tickSpacing
+        let maxDistance = width / 2
+        return min(pixelDistance / maxDistance, 1.0)
+    }
+
     // MARK: - Offset Calculation
 
     private func effectiveOffset(in width: CGFloat) -> CGFloat {
-        let centerOffset = width / 2 - cellWidth / 2
+        let centerOffset = width / 2 - config.tickSpacing / 2
 
         switch state {
         case .idle:
             return centerOffset + renderOffset
         case .dragging, .decelerating:
             let stepIndex = (dragStartValue - bounds.lowerBound) / V(step)
-            let baseOffset = -CGFloat(stepIndex) * cellWidth
+            let baseOffset = -CGFloat(stepIndex) * config.tickSpacing
             return centerOffset + baseOffset + dragOffset
         }
     }
@@ -159,6 +218,7 @@ public struct SteppingWheel<V>: View where V: BinaryFloatingPoint, V.Stride: Bin
             animationTimer = nil
         }
         state = .idle
+        velocity = 0
     }
 
     private func handleTouchEnded() {
@@ -189,16 +249,18 @@ public struct SteppingWheel<V>: View where V: BinaryFloatingPoint, V.Stride: Bin
         dragStartValue = value
         dragOffset = 0
         previousStepIndex = currentStepIndex
+        velocity = 0
         state = .dragging
         onEditingChanged?(true)
     }
 
     private func dragChanged(_ gesture: HorizontalDragGestureValue) {
         dragOffset = gesture.translation.width
+        velocity = gesture.velocity
 
         // Calculate which step we're on based on drag
         let totalOffset = dragOffset
-        let stepsDelta = Int((-totalOffset / cellWidth).rounded())
+        let stepsDelta = Int((-totalOffset / config.tickSpacing).rounded())
         let newStepIndex = Int((dragStartValue - bounds.lowerBound) / V(step)) + stepsDelta
         let clampedIndex = max(0, min(stepCount - 1, newStepIndex))
 
@@ -217,11 +279,11 @@ public struct SteppingWheel<V>: View where V: BinaryFloatingPoint, V.Stride: Bin
     }
 
     private func dragEnded(_ gesture: HorizontalDragGestureValue) {
-        let velocity = gesture.velocity
+        let endVelocity = gesture.velocity
 
-        // If velocity is significant, apply inertia
-        if abs(velocity) > 100 {
-            applyInertia(velocity: velocity)
+        // If velocity is significant, apply smooth inertia
+        if abs(endVelocity) > 50 {
+            applyInertia(velocity: endVelocity)
         } else {
             state = .idle
             snapToNearestStep()
@@ -229,67 +291,89 @@ public struct SteppingWheel<V>: View where V: BinaryFloatingPoint, V.Stride: Bin
         }
     }
 
-    // MARK: - Inertia
+    // MARK: - Smooth Inertia Physics
 
     private func applyInertia(velocity: CGFloat) {
         state = .decelerating
 
-        let decelerationRate: CGFloat = 0.992
-        let startOffset = dragOffset
-        let startStepIndex = currentStepIndex
+        // Physics constants - tuned for smooth, natural feel
+        let friction: CGFloat = 0.97  // Higher = more slide
+        let minVelocity: CGFloat = 20  // Stop threshold
 
-        // Calculate how many steps we'll travel
-        let totalDistance = velocity * (1 / (1 - decelerationRate)) / 1000
-        let stepsToTravel = Int((totalDistance / cellWidth).rounded())
-        let targetStepIndex = max(0, min(stepCount - 1, startStepIndex - stepsToTravel))
+        var currentVelocity = velocity
+        var currentOffset = dragOffset
+        let startStepIndex = Int((dragStartValue - bounds.lowerBound) / V(step))
 
-        // Animate to target step
-        let targetOffset = startOffset - CGFloat(targetStepIndex - startStepIndex) * cellWidth
-        let duration: TimeInterval = min(0.4, Double(abs(totalDistance)) / 500.0)
+        animationTimer = VSynchedTimer(duration: 3.0, animations: { progress, deltaTime in
+            // Apply friction (exponential decay)
+            currentVelocity *= friction
 
-        if duration < 0.05 {
-            // Too short, just snap
-            finalizeToStep(targetStepIndex)
-            return
-        }
-
-        animationTimer = VSynchedTimer(duration: duration, animations: { progress, _ in
-            // Ease out curve
-            let easedProgress = 1 - pow(1 - CGFloat(progress / duration), 3)
-            let currentOffset = startOffset + (targetOffset - startOffset) * easedProgress
+            // Update offset based on velocity
+            let frameOffset = currentVelocity * CGFloat(deltaTime)
+            currentOffset += frameOffset
             self.dragOffset = currentOffset
 
-            // Check for step crossings during animation
-            let currentStepsDelta = Int((-currentOffset / cellWidth).rounded())
-            let currentIndex = Int((dragStartValue - bounds.lowerBound) / V(step)) + currentStepsDelta
-            let clampedIndex = max(0, min(stepCount - 1, currentIndex))
+            // Calculate current step from offset
+            let stepsDelta = Int((-currentOffset / config.tickSpacing).rounded())
+            let currentIndex = max(0, min(stepCount - 1, startStepIndex + stepsDelta))
 
-            if clampedIndex != previousStepIndex {
-                tickHaptic()
-                previousStepIndex = clampedIndex
+            // Haptic feedback on step crossing
+            if currentIndex != self.previousStepIndex {
+                self.tickHaptic()
+                self.previousStepIndex = currentIndex
 
-                let newValue = bounds.lowerBound + V(clampedIndex) * V(step)
-                if value != newValue {
-                    value = newValue
-                    onStep?(newValue)
+                // Update value
+                let newValue = bounds.lowerBound + V(currentIndex) * V(step)
+                if self.value != newValue {
+                    self.value = newValue
+                    self.onStep?(newValue)
                 }
             }
+
+            // Check if we should stop
+            if abs(currentVelocity) < minVelocity {
+                self.animationTimer?.cancel()
+                self.finalizeDeceleration()
+            }
+
         }, completion: { completed in
             if completed {
-                finalizeToStep(targetStepIndex)
+                self.finalizeDeceleration()
             }
         })
     }
 
-    private func finalizeToStep(_ stepIndex: Int) {
-        let clampedIndex = max(0, min(stepCount - 1, stepIndex))
-        let newValue = bounds.lowerBound + V(clampedIndex) * V(step)
+    private func finalizeDeceleration() {
+        // Animate snap to nearest step
+        let targetValue = snappedValue
+        let targetIndex = Int(((targetValue - bounds.lowerBound) / V(step)).rounded())
+        let startStepIndex = Int((dragStartValue - bounds.lowerBound) / V(step))
+        let targetOffset = -CGFloat(targetIndex - startStepIndex) * config.tickSpacing
 
-        state = .idle
-        dragOffset = 0
-        value = newValue
-        onStep?(newValue)
-        onEditingChanged?(false)
+        let snapOffset = targetOffset - dragOffset
+
+        if abs(snapOffset) > 1 {
+            // Animate the snap
+            let startOffset = dragOffset
+            let snapDuration: TimeInterval = 0.15
+
+            animationTimer = VSynchedTimer(duration: snapDuration, animations: { progress, _ in
+                // Ease out
+                let t = CGFloat(progress / snapDuration)
+                let eased = 1 - pow(1 - t, 3)
+                self.dragOffset = startOffset + snapOffset * eased
+            }, completion: { _ in
+                self.state = .idle
+                self.dragOffset = 0
+                self.value = targetValue
+                self.onEditingChanged?(false)
+            })
+        } else {
+            state = .idle
+            dragOffset = 0
+            value = targetValue
+            onEditingChanged?(false)
+        }
     }
 
     // MARK: - Snap
@@ -306,60 +390,71 @@ public struct SteppingWheel<V>: View where V: BinaryFloatingPoint, V.Stride: Bin
 
     private func tickHaptic() {
         let generator = UIImpactFeedbackGenerator(style: .light)
-        generator.impactOccurred(intensity: 0.6)
-    }
-
-    private func boundaryHaptic() {
-        let generator = UIImpactFeedbackGenerator(style: .rigid)
-        generator.impactOccurred(intensity: 0.8)
+        generator.impactOccurred(intensity: 0.5)
     }
 }
 
-// MARK: - Step Cell View
+// MARK: - Tick View
 
-private struct StepCell<V: BinaryFloatingPoint>: View {
+private struct TickView<V: BinaryFloatingPoint>: View {
     let index: Int
     let value: V
     let isSelected: Bool
-    let cellWidth: CGFloat
+    let distanceFromCenter: CGFloat
+    let config: SteppingWheelConfig
 
     var body: some View {
-        VStack(spacing: 4) {
+        VStack(spacing: 2) {
             // Tick mark
             RoundedRectangle(cornerRadius: 1)
-                .fill(isSelected ? Color.accentColor : Color.secondary.opacity(0.5))
-                .frame(width: isSelected ? 3 : 2, height: isSelected ? 28 : 20)
+                .fill(Color.secondary.opacity(tickOpacity))
+                .frame(width: 2, height: tickHeight)
 
-            // Value label (only show for selected or every 5th)
-            if isSelected || index % 5 == 0 {
+            // Value label (only if enabled and at interval)
+            if config.showLabels && index % config.labelInterval == 0 {
                 Text("\(Int(value))")
-                    .font(isSelected ? .caption.bold() : .caption)
-                    .foregroundColor(isSelected ? .primary : .secondary)
+                    .font(.caption2)
+                    .foregroundColor(.secondary.opacity(tickOpacity))
             }
         }
-        .frame(width: cellWidth)
+        .frame(width: config.tickSpacing)
+    }
+
+    private var tickOpacity: Double {
+        // Fade out towards edges
+        let fadeStart: CGFloat = 0.3
+        if distanceFromCenter < fadeStart {
+            return 0.7
+        }
+        return Double(max(0.15, 0.7 * (1 - (distanceFromCenter - fadeStart) / (1 - fadeStart))))
+    }
+
+    private var tickHeight: CGFloat {
+        isSelected ? config.selectedTickHeight : config.tickHeight
     }
 }
 
-// MARK: - Cursor View
+// MARK: - Center Indicator
 
-private struct CursorView: View {
+private struct CenterIndicator: View {
+    let accentColor: Color
+
     var body: some View {
-        VStack(spacing: 0) {
-            // Triangle pointer
-            Image(systemName: "arrowtriangle.down.fill")
-                .font(.system(size: 12))
-                .foregroundColor(.red)
+        ZStack {
+            // Background rounded rectangle
+            RoundedRectangle(cornerRadius: 8)
+                .fill(Color(white: 0.2))
+                .frame(width: 36, height: 40)
 
-            // Line
-            Rectangle()
-                .fill(Color.red)
-                .frame(width: 2, height: 35)
+            // Accent line in center
+            RoundedRectangle(cornerRadius: 1)
+                .fill(accentColor)
+                .frame(width: 2, height: 24)
         }
     }
 }
 
-// MARK: - Clamped Extension (if not already available)
+// MARK: - Clamped Extension
 
 private extension BinaryFloatingPoint {
     func clamped(to range: ClosedRange<Self>) -> Self {
