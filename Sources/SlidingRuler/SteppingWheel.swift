@@ -510,12 +510,16 @@ public struct SteppingWheel<V>: View where V: BinaryFloatingPoint, V.Stride: Bin
         animationTimer?.cancel()
         animationTimer = nil
 
+        // 🎯 CRITICAL: Call onEditingChanged FIRST to allow client to update the binding
+        // This lets the client sync the wheel value to current video position
+        onEditingChanged?(true)
+
+        // THEN capture the (potentially updated) value as our drag start
         dragStartValue = value
         dragOffset = 0
         previousStepIndex = currentStepIndex
         velocity = 0
         state = .dragging
-        onEditingChanged?(true)
     }
 
     private func dragChanged(_ gesture: HorizontalDragGestureValue) {
@@ -559,6 +563,11 @@ public struct SteppingWheel<V>: View where V: BinaryFloatingPoint, V.Stride: Bin
     private func dragEnded(_ gesture: HorizontalDragGestureValue) {
         let endVelocity = gesture.velocity
 
+        // CRITICAL FIX: Notify that editing ended IMMEDIATELY when user lifts finger.
+        // This allows UI controls to reappear while wheel continues with inertia.
+        // The wheel can still animate internally, but the editing state is now "false".
+        onEditingChanged?(false)
+
         let isAtStartBoundary = currentStepIndex == 0
         let isAtEndBoundary = currentStepIndex == stepCount - 1
 
@@ -591,7 +600,7 @@ public struct SteppingWheel<V>: View where V: BinaryFloatingPoint, V.Stride: Bin
                 state = .idle
                 dragOffset = 0
             }
-            onEditingChanged?(false)
+            // onEditingChanged?(false) already called above
         }
     }
 
@@ -618,7 +627,7 @@ public struct SteppingWheel<V>: View where V: BinaryFloatingPoint, V.Stride: Bin
             state = .idle
             dragOffset = 0
             snapToNearestStep()
-            onEditingChanged?(false)
+            // onEditingChanged?(false) already called in dragEnded
             return
         }
 
@@ -633,7 +642,7 @@ public struct SteppingWheel<V>: View where V: BinaryFloatingPoint, V.Stride: Bin
             self.state = .idle
             self.dragOffset = 0
             self.snapToNearestStep()
-            self.onEditingChanged?(false)
+            // onEditingChanged?(false) already called in dragEnded
         })
     }
 
@@ -717,13 +726,13 @@ public struct SteppingWheel<V>: View where V: BinaryFloatingPoint, V.Stride: Bin
                 self.state = .idle
                 self.dragOffset = 0
                 self.value = targetValue
-                self.onEditingChanged?(false)
+                // onEditingChanged?(false) already called in dragEnded
             })
         } else {
             state = .idle
             dragOffset = 0
             value = targetValue
-            onEditingChanged?(false)
+            // onEditingChanged?(false) already called in dragEnded
         }
     }
 
