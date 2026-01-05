@@ -244,6 +244,16 @@ public struct SteppingWheel<V>: View where V: BinaryFloatingPoint, V.Stride: Bin
     private let onEditingChanged: ((Bool) -> Void)?
     private let style: SteppingWheelStyle
 
+    /// Optional callback to get dynamic bounds during drag.
+    /// When provided, the wheel enforces these bounds instead of the static `bounds`.
+    /// Use this for sync mode where valid range can change based on video positions.
+    private let dynamicBounds: (() -> ClosedRange<V>)?
+
+    /// Optional callback to get the current actual position synchronously.
+    /// This is called at the START of a drag to get the true position before capturing dragStartValue.
+    /// Use this when the value binding might be stale (e.g., after video playback where wheel doesn't roll).
+    private let getCurrentPosition: (() -> V)?
+
     @State private var state: SteppingWheelState = .idle
     @State private var dragStartValue: V = 0
     @State private var dragOffset: CGFloat = 0
@@ -253,8 +263,18 @@ public struct SteppingWheel<V>: View where V: BinaryFloatingPoint, V.Stride: Bin
 
     // MARK: - Computed
 
+    /// Active bounds - uses dynamic bounds if provided, otherwise static bounds
+    private var activeBounds: ClosedRange<V> {
+        dynamicBounds?() ?? bounds
+    }
+
+    /// Step count based on active bounds
+    private var activeStepCount: Int {
+        Int((activeBounds.upperBound - activeBounds.lowerBound) / V(step)) + 1
+    }
+
     private var currentStepIndex: Int {
-        Int(((value - bounds.lowerBound) / V(step)).rounded())
+        Int(((value - activeBounds.lowerBound) / V(step)).rounded())
     }
 
     private var stepCount: Int {
@@ -262,13 +282,15 @@ public struct SteppingWheel<V>: View where V: BinaryFloatingPoint, V.Stride: Bin
     }
 
     private var snappedValue: V {
-        let stepIndex = ((value - bounds.lowerBound) / V(step)).rounded()
-        let snapped = bounds.lowerBound + V(stepIndex) * V(step)
-        return min(max(snapped, bounds.lowerBound), bounds.upperBound)
+        let currentBounds = activeBounds
+        let stepIndex = ((value - currentBounds.lowerBound) / V(step)).rounded()
+        let snapped = currentBounds.lowerBound + V(stepIndex) * V(step)
+        return min(max(snapped, currentBounds.lowerBound), currentBounds.upperBound)
     }
 
     private var renderOffset: CGFloat {
-        let stepIndex = (value - bounds.lowerBound) / V(step)
+        let currentBounds = activeBounds
+        let stepIndex = (value - currentBounds.lowerBound) / V(step)
         return -CGFloat(stepIndex) * style.tickSpacing
     }
 
@@ -279,6 +301,8 @@ public struct SteppingWheel<V>: View where V: BinaryFloatingPoint, V.Stride: Bin
         in bounds: ClosedRange<V>,
         step: V.Stride = 1,
         style: SteppingWheelStyle = .default,
+        dynamicBounds: (() -> ClosedRange<V>)? = nil,
+        getCurrentPosition: (() -> V)? = nil,
         onStep: ((V) -> Void)? = nil,
         onEditingChanged: ((Bool) -> Void)? = nil
     ) {
@@ -286,6 +310,8 @@ public struct SteppingWheel<V>: View where V: BinaryFloatingPoint, V.Stride: Bin
         self.bounds = bounds
         self.step = step
         self.style = style
+        self.dynamicBounds = dynamicBounds
+        self.getCurrentPosition = getCurrentPosition
         self.onStep = onStep
         self.onEditingChanged = onEditingChanged
     }
@@ -295,6 +321,8 @@ public struct SteppingWheel<V>: View where V: BinaryFloatingPoint, V.Stride: Bin
         in bounds: ClosedRange<V>,
         step: V.Stride = 1,
         config: SteppingWheelConfig,
+        dynamicBounds: (() -> ClosedRange<V>)? = nil,
+        getCurrentPosition: (() -> V)? = nil,
         onStep: ((V) -> Void)? = nil,
         onEditingChanged: ((Bool) -> Void)? = nil
     ) {
@@ -302,6 +330,8 @@ public struct SteppingWheel<V>: View where V: BinaryFloatingPoint, V.Stride: Bin
         self.bounds = bounds
         self.step = step
         self.style = config.toStyle()
+        self.dynamicBounds = dynamicBounds
+        self.getCurrentPosition = getCurrentPosition
         self.onStep = onStep
         self.onEditingChanged = onEditingChanged
     }
@@ -347,22 +377,40 @@ public struct SteppingWheel<V>: View where V: BinaryFloatingPoint, V.Stride: Bin
             let centerX = canvasSize.width / 2
             let centerY = canvasSize.height / 2
 
+            // 🎯 Use ACTIVE bounds for consistent rendering
+            let currentBounds = activeBounds
+            let currentStepCount = activeStepCount
+
             // Calculate current offset
-            let offset: CGFloat
+            var offset: CGFloat
             switch state {
             case .idle:
                 offset = renderOffset
             case .dragging, .decelerating:
-                let stepIndex = (dragStartValue - bounds.lowerBound) / V(step)
+                // 🎯 FIX: Clamp dragStartValue to bounds before calculating offset
+                // This prevents rendering artifacts when dragStartValue is out of bounds
+                let clampedDragStart = max(currentBounds.lowerBound, min(currentBounds.upperBound, dragStartValue))
+                let stepIndex = (clampedDragStart - currentBounds.lowerBound) / V(step)
                 let baseOffset = -CGFloat(stepIndex) * style.tickSpacing
                 offset = baseOffset + dragOffset
             }
+
+            // 🎯 FIX: Clamp offset to valid rendering range
+            // The offset should never show ticks beyond the valid bounds
+            // Max left offset = 0 (first tick at center), Max right offset = -(stepCount-1)*spacing
+            let maxLeftOffset = CGFloat(currentStepCount) * style.tickSpacing  // Some extra margin
+            let maxRightOffset = -CGFloat(currentStepCount) * style.tickSpacing
+            offset = max(maxRightOffset, min(maxLeftOffset, offset))
 
             // Calculate visible tick range (only draw what's on screen)
             let ticksOnScreen = Int(canvasSize.width / style.tickSpacing) + 4
             let centerTickIndex = Int(-offset / style.tickSpacing)
             let startTick = max(0, centerTickIndex - ticksOnScreen / 2)
-            let endTick = min(stepCount - 1, centerTickIndex + ticksOnScreen / 2)
+            let endTick = min(currentStepCount - 1, centerTickIndex + ticksOnScreen / 2)
+
+            // 🎯 FIX: Guard against invalid range (startTick > endTick)
+            // This can happen when offset is way out of bounds
+            guard startTick <= endTick, currentStepCount > 0 else { return }
 
             // Draw only visible ticks
             for i in startTick...endTick {
@@ -510,12 +558,37 @@ public struct SteppingWheel<V>: View where V: BinaryFloatingPoint, V.Stride: Bin
         animationTimer?.cancel()
         animationTimer = nil
 
-        // 🎯 CRITICAL: Call onEditingChanged FIRST to allow client to update the binding
-        // This lets the client sync the wheel value to current video position
+        // 🎯 FIX: Get the ACTUAL current position SYNCHRONOUSLY before anything else
+        // This fixes the race condition where:
+        // 1. Videos play to the end (wheel value doesn't update during playback)
+        // 2. User starts dragging
+        // 3. onEditingChanged tries to update binding but it's async
+        // 4. We read stale value and capture wrong dragStartValue
+        //
+        // By calling getCurrentPosition() FIRST, we get the actual video position
+        // synchronously, bypassing the async binding update issue.
+        let actualPosition: V
+        if let getPosition = getCurrentPosition {
+            actualPosition = getPosition()
+        } else {
+            actualPosition = value
+        }
+
+        // 🎯 CRITICAL: Call onEditingChanged to notify client that editing started
         onEditingChanged?(true)
 
-        // THEN capture the (potentially updated) value as our drag start
-        dragStartValue = value
+        // 🎯 BIDIRECTIONAL: Clamp the ACTUAL position to current bounds before capturing
+        let currentBounds = activeBounds
+        let clampedValue = max(currentBounds.lowerBound, min(currentBounds.upperBound, actualPosition))
+
+        // Capture the correctly positioned value as our drag start
+        dragStartValue = clampedValue
+
+        // Also update the binding to match the actual position
+        if value != clampedValue {
+            value = clampedValue
+        }
+
         dragOffset = 0
         previousStepIndex = currentStepIndex
         velocity = 0
@@ -526,37 +599,73 @@ public struct SteppingWheel<V>: View where V: BinaryFloatingPoint, V.Stride: Bin
         let rawOffset = gesture.translation.width
         velocity = gesture.velocity
 
-        let startStepIndex = Int((dragStartValue - bounds.lowerBound) / V(step))
-        let maxOffsetLeft = CGFloat(startStepIndex) * style.tickSpacing
-        let maxOffsetRight = -CGFloat(stepCount - 1 - startStepIndex) * style.tickSpacing
+        // 🎯 Use ACTIVE bounds (dynamic if provided, otherwise static)
+        let currentBounds = activeBounds
+        let currentStepCount = activeStepCount
 
-        // Rubber band at edges
-        let clampedOffset: CGFloat
-        if rawOffset > maxOffsetLeft {
+        // DEBUG: Check if dynamicBounds is nil
+        print("🔍 Wheel: dynamicBounds is \(dynamicBounds == nil ? "NIL" : "SET"), staticBounds=\(String(format: "%.1f", Double(bounds.lowerBound)))...\(String(format: "%.1f", Double(bounds.upperBound)))")
+
+        // 🎯 CRITICAL FIX: If dragStartValue is out of bounds, reset it to the nearest boundary
+        // This can happen when bounds change (e.g., sync mode activated while at a position)
+        let wasDragStartOutOfBounds = dragStartValue < currentBounds.lowerBound || dragStartValue > currentBounds.upperBound
+        let clampedDragStart = max(currentBounds.lowerBound, min(currentBounds.upperBound, dragStartValue))
+
+        // If we had to clamp dragStartValue, update it to prevent further drift
+        if wasDragStartOutOfBounds {
+            dragStartValue = clampedDragStart
+        }
+
+        let startStepIndex = Int((clampedDragStart - currentBounds.lowerBound) / V(step))
+
+        // Offset limits: how far can we drag in each direction
+        // Drag LEFT (negative offset) = toward higher values (forward)
+        // Drag RIGHT (positive offset) = toward lower values (backward)
+        let maxOffsetLeft = -CGFloat(max(0, currentStepCount - 1 - startStepIndex)) * style.tickSpacing
+        let maxOffsetRight = CGFloat(startStepIndex) * style.tickSpacing
+
+        // DEBUG
+        print("🎰 Wheel drag: rawOffset=\(String(format: "%.1f", rawOffset)), bounds=\(String(format: "%.1f", Double(currentBounds.lowerBound)))...\(String(format: "%.1f", Double(currentBounds.upperBound))), startStepIdx=\(startStepIndex), maxLeft=\(String(format: "%.1f", maxOffsetLeft)), maxRight=\(String(format: "%.1f", maxOffsetRight))")
+
+        // Rubber band at edges (with dynamic bounds enforcement)
+        var clampedOffset: CGFloat
+        if rawOffset < maxOffsetLeft {
             let overflow = rawOffset - maxOffsetLeft
             clampedOffset = maxOffsetLeft + overflow * 0.2
-        } else if rawOffset < maxOffsetRight {
+        } else if rawOffset > maxOffsetRight {
             let overflow = rawOffset - maxOffsetRight
             clampedOffset = maxOffsetRight + overflow * 0.2
         } else {
             clampedOffset = rawOffset
         }
 
+        // 🎯 HARD CLAMP: Limit rubber-band stretch to prevent extreme offsets
+        let maxRubberBand = CGFloat(currentStepCount) * style.tickSpacing * 0.5
+        let hardMaxLeft = maxOffsetLeft - maxRubberBand
+        let hardMaxRight = maxOffsetRight + maxRubberBand
+        clampedOffset = max(hardMaxLeft, min(hardMaxRight, clampedOffset))
+
         dragOffset = clampedOffset
 
+        // Original direction: drag LEFT (negative) = forward, drag RIGHT (positive) = backward
         let stepsDelta = Int((-rawOffset / style.tickSpacing).rounded())
         let newStepIndex = startStepIndex + stepsDelta
-        let clampedIndex = max(0, min(stepCount - 1, newStepIndex))
+        let clampedIndex = max(0, min(currentStepCount - 1, newStepIndex))
+
+        // DEBUG
+        print("🎰 Wheel step: stepsDelta=\(stepsDelta), newStepIdx=\(newStepIndex), clampedIdx=\(clampedIndex), newValue=\(String(format: "%.1f", Double(currentBounds.lowerBound) + Double(clampedIndex) * Double(step)))")
 
         if clampedIndex != previousStepIndex {
             tickHaptic()
             previousStepIndex = clampedIndex
         }
 
-        let newValue = bounds.lowerBound + V(clampedIndex) * V(step)
-        if value != newValue {
-            value = newValue
-            onStep?(newValue)
+        // 🎯 Calculate and clamp value to bounds (bidirectional)
+        let newValue = currentBounds.lowerBound + V(clampedIndex) * V(step)
+        let clampedValue = max(currentBounds.lowerBound, min(currentBounds.upperBound, newValue))
+        if value != clampedValue {
+            value = clampedValue
+            onStep?(clampedValue)
         }
     }
 
@@ -568,19 +677,34 @@ public struct SteppingWheel<V>: View where V: BinaryFloatingPoint, V.Stride: Bin
         // The wheel can still animate internally, but the editing state is now "false".
         onEditingChanged?(false)
 
-        let isAtStartBoundary = currentStepIndex == 0
-        let isAtEndBoundary = currentStepIndex == stepCount - 1
+        // 🎯 Use ACTIVE bounds (dynamic if provided, otherwise static)
+        let currentBounds = activeBounds
+        let currentStepCount = activeStepCount
+
+        // 🎯 BIDIRECTIONAL: Check boundaries using clamped values
+        let isAtStartBoundary = value <= currentBounds.lowerBound
+        let isAtEndBoundary = value >= currentBounds.upperBound
 
         // Check if we're in rubber-band state (dragged past boundary)
-        let startStepIndex = Int((dragStartValue - bounds.lowerBound) / V(step))
-        let maxOffsetLeft = CGFloat(startStepIndex) * style.tickSpacing
-        let maxOffsetRight = -CGFloat(stepCount - 1 - startStepIndex) * style.tickSpacing
-        let isInRubberBand = dragOffset > maxOffsetLeft || dragOffset < maxOffsetRight
+        // Original direction: drag LEFT (negative) = forward, drag RIGHT (positive) = backward
+        let clampedDragStart = max(currentBounds.lowerBound, min(currentBounds.upperBound, dragStartValue))
+        let startStepIndex = Int((clampedDragStart - currentBounds.lowerBound) / V(step))
+        let maxOffsetLeft = -CGFloat(max(0, currentStepCount - 1 - startStepIndex)) * style.tickSpacing
+        let maxOffsetRight = CGFloat(startStepIndex) * style.tickSpacing
+
+        // Velocity direction (original convention):
+        // - Negative velocity → moving left → toward higher values (forward)
+        // - Positive velocity → moving right → toward lower values (backward)
+        let isPastLeftAndMovingLeft = dragOffset < maxOffsetLeft && endVelocity < 0
+        let isPastRightAndMovingRight = dragOffset > maxOffsetRight && endVelocity > 0
+        let isInRubberBand = isPastLeftAndMovingLeft || isPastRightAndMovingRight
 
         let shouldApplyInertia: Bool
         if isAtStartBoundary && endVelocity > 0 {
+            // At lower bound and trying to go more backward (right) - don't apply inertia
             shouldApplyInertia = false
         } else if isAtEndBoundary && endVelocity < 0 {
+            // At upper bound and trying to go more forward (left) - don't apply inertia
             shouldApplyInertia = false
         } else {
             shouldApplyInertia = abs(endVelocity) > 50
@@ -605,16 +729,25 @@ public struct SteppingWheel<V>: View where V: BinaryFloatingPoint, V.Stride: Bin
     }
 
     private func animateSnapBack() {
+        // 🎯 Use ACTIVE bounds (dynamic if provided, otherwise static)
+        let currentBounds = activeBounds
+        let currentStepCount = activeStepCount
+
+        // 🎯 BIDIRECTIONAL: Clamp dragStartValue to current bounds
+        let clampedDragStart = max(currentBounds.lowerBound, min(currentBounds.upperBound, dragStartValue))
+
         // Animate back from rubber-band state to boundary
-        let startStepIndex = Int((dragStartValue - bounds.lowerBound) / V(step))
-        let maxOffsetLeft = CGFloat(startStepIndex) * style.tickSpacing
-        let maxOffsetRight = -CGFloat(stepCount - 1 - startStepIndex) * style.tickSpacing
+        let startStepIndex = Int((clampedDragStart - currentBounds.lowerBound) / V(step))
+
+        // Original direction: drag LEFT (negative) = forward, drag RIGHT (positive) = backward
+        let maxOffsetLeft = -CGFloat(max(0, currentStepCount - 1 - startStepIndex)) * style.tickSpacing
+        let maxOffsetRight = CGFloat(startStepIndex) * style.tickSpacing
 
         // Calculate target offset (clamp to valid range)
         let targetOffset: CGFloat
-        if dragOffset > maxOffsetLeft {
+        if dragOffset < maxOffsetLeft {
             targetOffset = maxOffsetLeft
-        } else if dragOffset < maxOffsetRight {
+        } else if dragOffset > maxOffsetRight {
             targetOffset = maxOffsetRight
         } else {
             targetOffset = dragOffset
@@ -656,41 +789,80 @@ public struct SteppingWheel<V>: View where V: BinaryFloatingPoint, V.Stride: Bin
 
         var currentVelocity = velocity
         var currentOffset = dragOffset
-        let startStepIndex = Int((dragStartValue - bounds.lowerBound) / V(step))
-
-        let maxOffsetLeft = CGFloat(startStepIndex) * style.tickSpacing
-        let maxOffsetRight = -CGFloat(stepCount - 1 - startStepIndex) * style.tickSpacing
 
         animationTimer = VSynchedTimer(duration: 3.0, animations: { progress, deltaTime in
+            // 🎯 Query ACTIVE bounds on each frame for dynamic sync boundaries
+            let currentBounds = self.activeBounds
+            let currentStepCount = self.activeStepCount
+
+            // 🎯 CRITICAL FIX: If dragStartValue was out of bounds, reset everything
+            let wasDragStartOutOfBounds = self.dragStartValue < currentBounds.lowerBound || self.dragStartValue > currentBounds.upperBound
+            if wasDragStartOutOfBounds {
+                // Reset drag start to valid bounds and recalculate offset
+                self.dragStartValue = max(currentBounds.lowerBound, min(currentBounds.upperBound, self.dragStartValue))
+                currentOffset = 0  // Reset offset since we've corrected dragStartValue
+                currentVelocity = 0  // Stop movement
+            }
+
+            let clampedDragStart = max(currentBounds.lowerBound, min(currentBounds.upperBound, self.dragStartValue))
+            let startStepIndex = Int((clampedDragStart - currentBounds.lowerBound) / V(self.step))
+
+            // Original direction: drag LEFT (negative) = forward, drag RIGHT (positive) = backward
+            let maxOffsetLeft = -CGFloat(max(0, currentStepCount - 1 - startStepIndex)) * self.style.tickSpacing
+            let maxOffsetRight = CGFloat(startStepIndex) * self.style.tickSpacing
+
             currentVelocity *= friction
 
             let frameOffset = currentVelocity * CGFloat(deltaTime)
             currentOffset += frameOffset
 
             var hitBoundary = false
-            if currentOffset > maxOffsetLeft {
+
+            // 🎯 HARD CLAMP: Always ensure offset stays within bounds
+            // Negative offset = forward (left), positive offset = backward (right)
+            if currentOffset < maxOffsetLeft {
                 currentOffset = maxOffsetLeft
-                currentVelocity = 0
-                hitBoundary = true
-            } else if currentOffset < maxOffsetRight {
+                if currentVelocity < 0 {
+                    currentVelocity = 0
+                    hitBoundary = true
+                }
+            } else if currentOffset > maxOffsetRight {
                 currentOffset = maxOffsetRight
-                currentVelocity = 0
-                hitBoundary = true
+                if currentVelocity > 0 {
+                    currentVelocity = 0
+                    hitBoundary = true
+                }
             }
 
             self.dragOffset = currentOffset
 
+            // Original direction: negative offset = forward (higher values)
             let stepsDelta = Int((-currentOffset / self.style.tickSpacing).rounded())
-            let currentIndex = max(0, min(self.stepCount - 1, startStepIndex + stepsDelta))
+            let currentIndex = max(0, min(currentStepCount - 1, startStepIndex + stepsDelta))
+
+            // Calculate new value
+            let newValue = currentBounds.lowerBound + V(currentIndex) * V(self.step)
+
+            // 🎯 HARD CLAMP: Always clamp value to bounds
+            let finalValue = max(currentBounds.lowerBound, min(currentBounds.upperBound, newValue))
+
+            // Original direction: negative velocity = forward (toward upper bound)
+            // positive velocity = backward (toward lower bound)
+            if finalValue <= currentBounds.lowerBound && currentVelocity > 0 {
+                hitBoundary = true
+                currentVelocity = 0
+            } else if finalValue >= currentBounds.upperBound && currentVelocity < 0 {
+                hitBoundary = true
+                currentVelocity = 0
+            }
 
             if currentIndex != self.previousStepIndex {
                 self.tickHaptic()
                 self.previousStepIndex = currentIndex
 
-                let newValue = self.bounds.lowerBound + V(currentIndex) * V(self.step)
-                if self.value != newValue {
-                    self.value = newValue
-                    self.onStep?(newValue)
+                if self.value != finalValue {
+                    self.value = finalValue
+                    self.onStep?(finalValue)
                 }
             }
 
@@ -707,9 +879,16 @@ public struct SteppingWheel<V>: View where V: BinaryFloatingPoint, V.Stride: Bin
     }
 
     private func finalizeDeceleration() {
+        // 🎯 Use ACTIVE bounds for final snap
+        let currentBounds = activeBounds
+
+        // 🎯 BIDIRECTIONAL: Clamp values to current bounds
+        let clampedDragStart = max(currentBounds.lowerBound, min(currentBounds.upperBound, dragStartValue))
         let targetValue = snappedValue
-        let targetIndex = Int(((targetValue - bounds.lowerBound) / V(step)).rounded())
-        let startStepIndex = Int((dragStartValue - bounds.lowerBound) / V(step))
+        let clampedTarget = max(currentBounds.lowerBound, min(currentBounds.upperBound, targetValue))
+
+        let targetIndex = Int(((clampedTarget - currentBounds.lowerBound) / V(step)).rounded())
+        let startStepIndex = Int((clampedDragStart - currentBounds.lowerBound) / V(step))
         let targetOffset = -CGFloat(targetIndex - startStepIndex) * style.tickSpacing
 
         let snapOffset = targetOffset - dragOffset
@@ -725,22 +904,25 @@ public struct SteppingWheel<V>: View where V: BinaryFloatingPoint, V.Stride: Bin
             }, completion: { _ in
                 self.state = .idle
                 self.dragOffset = 0
-                self.value = targetValue
+                self.value = clampedTarget
                 // onEditingChanged?(false) already called in dragEnded
             })
         } else {
             state = .idle
             dragOffset = 0
-            value = targetValue
+            value = clampedTarget
             // onEditingChanged?(false) already called in dragEnded
         }
     }
 
     private func snapToNearestStep() {
+        // 🎯 BIDIRECTIONAL: Clamp snapped value to current bounds
+        let currentBounds = activeBounds
         let snapped = snappedValue
-        if value != snapped {
-            value = snapped
-            onStep?(snapped)
+        let clampedSnapped = max(currentBounds.lowerBound, min(currentBounds.upperBound, snapped))
+        if value != clampedSnapped {
+            value = clampedSnapped
+            onStep?(clampedSnapped)
         }
     }
 

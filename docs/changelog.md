@@ -10,6 +10,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Added
 - **SteppingWheel**: New discrete step wheel control for frame-by-frame navigation
+- **Dynamic bounds support**: `dynamicBounds` callback for sync mode where valid range changes based on external state
+- **Current position callback**: `getCurrentPosition` callback to get actual position synchronously at drag start
   - Canvas-based rendering optimized for 50,000+ steps (long video support)
   - Only renders visible ticks for O(visible) performance instead of O(total)
   - Inertia physics with friction-based deceleration
@@ -25,6 +27,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 - Visual jump when releasing slow drag on SteppingWheel (using Transaction to disable implicit animations)
+- **Race condition at drag start**: Fixed stale value capture when wheel position drifts during video playback
+- **Bidirectional sync**: Values now correctly clamp to dynamic bounds during drag and deceleration
+- **Rendering artifacts**: Fixed offset clamping to prevent ticks from rendering beyond valid bounds
+- **Inertia boundary handling**: Deceleration now stops correctly when hitting dynamic bounds
 
 ---
 

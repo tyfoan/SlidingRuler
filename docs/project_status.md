@@ -2,7 +2,7 @@
 
 > Current progress for SlidingRuler
 
-**Last Updated**: 2026-01-02
+**Last Updated**: 2026-01-05
 
 ---
 
@@ -69,12 +69,17 @@
 - [x] **SteppingWheel** (discrete step control)
 - [x] **SteppingWheelStyle** (visual customization)
 - [x] **Canvas-based rendering** (performance optimization)
+- [x] **Dynamic bounds API** (sync mode support)
 - [ ] Layout direction (RTL)
 - [ ] Accessibility
 
 ---
 
 ## Recent Updates
+
+### 2026-01-05
+- **Dynamic bounds API**: Added `dynamicBounds` and `getCurrentPosition` callbacks for sync mode
+- **Sync mode fixes**: Fixed race conditions and bidirectional value clamping for video sync scenarios
 
 ### 2026-01-02
 - **SteppingWheel component**: New discrete step wheel for frame-by-frame navigation

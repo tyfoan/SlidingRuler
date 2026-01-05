@@ -88,6 +88,8 @@ Key features:
 - Inertia physics with friction-based deceleration
 - Rubber-band effect at boundaries
 - VSynchedTimer for frame-synced animations
+- **Dynamic bounds**: `dynamicBounds` callback for sync mode where valid range changes externally
+- **Position sync**: `getCurrentPosition` callback to get actual position synchronously at drag start
 
 ### 7. SteppingWheelStyle
 **Purpose**: Struct-based comprehensive visual customization
