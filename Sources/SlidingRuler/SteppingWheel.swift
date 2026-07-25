@@ -254,6 +254,11 @@ public struct SteppingWheel<V>: View where V: BinaryFloatingPoint, V.Stride: Bin
     /// Use this when the value binding might be stale (e.g., after video playback where wheel doesn't roll).
     private let getCurrentPosition: (() -> V)?
 
+    /// Changing this value immediately cancels the current drag or inertia.
+    /// Clients use it to hand control to another timeline input, such as a
+    /// slider, without allowing both controls to keep changing the value.
+    private let cancellationToken: Int
+
     @State private var state: SteppingWheelState = .idle
     @State private var dragStartValue: V = 0
     @State private var dragOffset: CGFloat = 0
@@ -304,6 +309,7 @@ public struct SteppingWheel<V>: View where V: BinaryFloatingPoint, V.Stride: Bin
         style: SteppingWheelStyle = .default,
         dynamicBounds: (() -> ClosedRange<V>)? = nil,
         getCurrentPosition: (() -> V)? = nil,
+        cancellationToken: Int = 0,
         onStep: ((V) -> Void)? = nil,
         onEditingChanged: ((Bool) -> Void)? = nil
     ) {
@@ -313,6 +319,7 @@ public struct SteppingWheel<V>: View where V: BinaryFloatingPoint, V.Stride: Bin
         self.style = style
         self.dynamicBounds = dynamicBounds
         self.getCurrentPosition = getCurrentPosition
+        self.cancellationToken = cancellationToken
         self.onStep = onStep
         self.onEditingChanged = onEditingChanged
     }
@@ -324,6 +331,7 @@ public struct SteppingWheel<V>: View where V: BinaryFloatingPoint, V.Stride: Bin
         config: SteppingWheelConfig,
         dynamicBounds: (() -> ClosedRange<V>)? = nil,
         getCurrentPosition: (() -> V)? = nil,
+        cancellationToken: Int = 0,
         onStep: ((V) -> Void)? = nil,
         onEditingChanged: ((Bool) -> Void)? = nil
     ) {
@@ -333,6 +341,7 @@ public struct SteppingWheel<V>: View where V: BinaryFloatingPoint, V.Stride: Bin
         self.style = config.toStyle()
         self.dynamicBounds = dynamicBounds
         self.getCurrentPosition = getCurrentPosition
+        self.cancellationToken = cancellationToken
         self.onStep = onStep
         self.onEditingChanged = onEditingChanged
     }
@@ -369,6 +378,12 @@ public struct SteppingWheel<V>: View where V: BinaryFloatingPoint, V.Stride: Bin
             prematureEnd: handleTouchEnded,
             perform: handleDrag
         )
+        .onChange(of: cancellationToken) { _ in
+            cancelInteraction(shouldSnap: false)
+        }
+        .onDisappear {
+            cancelInteraction(shouldSnap: false)
+        }
     }
 
     // MARK: - Canvas Rendering (Performance Optimized)
@@ -603,9 +618,6 @@ public struct SteppingWheel<V>: View where V: BinaryFloatingPoint, V.Stride: Bin
         let currentBounds = activeBounds
         let currentStepCount = activeStepCount
 
-        // DEBUG: Check if dynamicBounds is nil
-        print("🔍 Wheel: dynamicBounds is \(dynamicBounds == nil ? "NIL" : "SET"), staticBounds=\(String(format: "%.1f", Double(bounds.lowerBound)))...\(String(format: "%.1f", Double(bounds.upperBound)))")
-
         // 🎯 CRITICAL FIX: If dragStartValue is out of bounds, reset it to the nearest boundary
         // This can happen when bounds change (e.g., sync mode activated while at a position)
         let wasDragStartOutOfBounds = dragStartValue < currentBounds.lowerBound || dragStartValue > currentBounds.upperBound
@@ -623,9 +635,6 @@ public struct SteppingWheel<V>: View where V: BinaryFloatingPoint, V.Stride: Bin
         // Drag RIGHT (positive offset) = toward lower values (backward)
         let maxOffsetLeft = -CGFloat(max(0, currentStepCount - 1 - startStepIndex)) * style.tickSpacing
         let maxOffsetRight = CGFloat(startStepIndex) * style.tickSpacing
-
-        // DEBUG
-        print("🎰 Wheel drag: rawOffset=\(String(format: "%.1f", rawOffset)), bounds=\(String(format: "%.1f", Double(currentBounds.lowerBound)))...\(String(format: "%.1f", Double(currentBounds.upperBound))), startStepIdx=\(startStepIndex), maxLeft=\(String(format: "%.1f", maxOffsetLeft)), maxRight=\(String(format: "%.1f", maxOffsetRight))")
 
         // Rubber band at edges (with dynamic bounds enforcement)
         var clampedOffset: CGFloat
@@ -652,9 +661,6 @@ public struct SteppingWheel<V>: View where V: BinaryFloatingPoint, V.Stride: Bin
         let newStepIndex = startStepIndex + stepsDelta
         let clampedIndex = max(0, min(currentStepCount - 1, newStepIndex))
 
-        // DEBUG
-        print("🎰 Wheel step: stepsDelta=\(stepsDelta), newStepIdx=\(newStepIndex), clampedIdx=\(clampedIndex), newValue=\(String(format: "%.1f", Double(currentBounds.lowerBound) + Double(clampedIndex) * Double(step)))")
-
         if clampedIndex != previousStepIndex {
             tickHaptic()
             previousStepIndex = clampedIndex
@@ -671,11 +677,6 @@ public struct SteppingWheel<V>: View where V: BinaryFloatingPoint, V.Stride: Bin
 
     private func dragEnded(_ gesture: HorizontalDragGestureValue) {
         let endVelocity = gesture.velocity
-
-        // CRITICAL FIX: Notify that editing ended IMMEDIATELY when user lifts finger.
-        // This allows UI controls to reappear while wheel continues with inertia.
-        // The wheel can still animate internally, but the editing state is now "false".
-        endEditingSessionIfNeeded()
 
         // 🎯 Use ACTIVE bounds (dynamic if provided, otherwise static)
         let currentBounds = activeBounds
@@ -724,13 +725,19 @@ public struct SteppingWheel<V>: View where V: BinaryFloatingPoint, V.Stride: Bin
                 state = .idle
                 dragOffset = 0
             }
-            // onEditingChanged?(false) already called above
+            endEditingSessionIfNeeded()
         }
     }
 
     /// Restores the wheel after UIKit or another recognizer interrupts the drag.
     /// A cancelled touch must not preserve editing state or a transient offset.
     private func dragCancelled() {
+        cancelInteraction(shouldSnap: true)
+    }
+
+    /// Stops both touch-driven motion and post-touch inertia. This is also the
+    /// handoff point used when another timeline control starts interacting.
+    private func cancelInteraction(shouldSnap: Bool) {
         cancelAnimation()
 
         var transaction = Transaction()
@@ -741,7 +748,7 @@ public struct SteppingWheel<V>: View where V: BinaryFloatingPoint, V.Stride: Bin
             velocity = 0
         }
 
-        snapToNearestStep()
+        if shouldSnap { snapToNearestStep() }
         endEditingSessionIfNeeded()
     }
 
@@ -795,7 +802,7 @@ public struct SteppingWheel<V>: View where V: BinaryFloatingPoint, V.Stride: Bin
             state = .idle
             dragOffset = 0
             snapToNearestStep()
-            // onEditingChanged?(false) already called in dragEnded
+            endEditingSessionIfNeeded()
             return
         }
 
@@ -806,11 +813,12 @@ public struct SteppingWheel<V>: View where V: BinaryFloatingPoint, V.Stride: Bin
             let t = CGFloat(progress / snapDuration)
             let eased = 1 - pow(1 - t, 3)
             self.dragOffset = startOffset + offsetDelta * eased
-        }, completion: { _ in
+        }, completion: { completed in
+            guard completed else { return }
             self.state = .idle
             self.dragOffset = 0
             self.snapToNearestStep()
-            // onEditingChanged?(false) already called in dragEnded
+            self.endEditingSessionIfNeeded()
         })
     }
 
@@ -936,17 +944,18 @@ public struct SteppingWheel<V>: View where V: BinaryFloatingPoint, V.Stride: Bin
                 let t = CGFloat(progress / snapDuration)
                 let eased = 1 - pow(1 - t, 3)
                 self.dragOffset = startOffset + snapOffset * eased
-            }, completion: { _ in
+            }, completion: { completed in
+                guard completed else { return }
                 self.state = .idle
                 self.dragOffset = 0
                 self.value = clampedTarget
-                // onEditingChanged?(false) already called in dragEnded
+                self.endEditingSessionIfNeeded()
             })
         } else {
             state = .idle
             dragOffset = 0
             value = clampedTarget
-            // onEditingChanged?(false) already called in dragEnded
+            endEditingSessionIfNeeded()
         }
     }
 
