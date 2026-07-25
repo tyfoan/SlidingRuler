@@ -260,6 +260,7 @@ public struct SteppingWheel<V>: View where V: BinaryFloatingPoint, V.Stride: Bin
     @State private var previousStepIndex: Int = 0
     @State private var animationTimer: VSynchedTimer?
     @State private var velocity: CGFloat = 0
+    @State private var isEditingSessionActive = false
 
     // MARK: - Computed
 
@@ -520,11 +521,9 @@ public struct SteppingWheel<V>: View where V: BinaryFloatingPoint, V.Stride: Bin
     // MARK: - Gesture Handling
 
     private func handleTouchBegan() {
-        if state == .decelerating {
-            animationTimer?.cancel()
-            animationTimer = nil
-        }
+        cancelAnimation()
         state = .idle
+        dragOffset = 0
         velocity = 0
     }
 
@@ -537,8 +536,8 @@ public struct SteppingWheel<V>: View where V: BinaryFloatingPoint, V.Stride: Bin
                 dragOffset = 0
             }
             snapToNearestStep()
-            onEditingChanged?(false)
         }
+        endEditingSessionIfNeeded()
     }
 
     private func handleDrag(_ gesture: HorizontalDragGestureValue) {
@@ -549,14 +548,15 @@ public struct SteppingWheel<V>: View where V: BinaryFloatingPoint, V.Stride: Bin
             dragChanged(gesture)
         case .ended:
             dragEnded(gesture)
+        case .cancelled, .failed:
+            dragCancelled()
         default:
             break
         }
     }
 
     private func dragBegan(_ gesture: HorizontalDragGestureValue) {
-        animationTimer?.cancel()
-        animationTimer = nil
+        cancelAnimation()
 
         // 🎯 FIX: Get the ACTUAL current position SYNCHRONOUSLY before anything else
         // This fixes the race condition where:
@@ -575,7 +575,7 @@ public struct SteppingWheel<V>: View where V: BinaryFloatingPoint, V.Stride: Bin
         }
 
         // 🎯 CRITICAL: Call onEditingChanged to notify client that editing started
-        onEditingChanged?(true)
+        beginEditingSessionIfNeeded()
 
         // 🎯 BIDIRECTIONAL: Clamp the ACTUAL position to current bounds before capturing
         let currentBounds = activeBounds
@@ -675,7 +675,7 @@ public struct SteppingWheel<V>: View where V: BinaryFloatingPoint, V.Stride: Bin
         // CRITICAL FIX: Notify that editing ended IMMEDIATELY when user lifts finger.
         // This allows UI controls to reappear while wheel continues with inertia.
         // The wheel can still animate internally, but the editing state is now "false".
-        onEditingChanged?(false)
+        endEditingSessionIfNeeded()
 
         // 🎯 Use ACTIVE bounds (dynamic if provided, otherwise static)
         let currentBounds = activeBounds
@@ -726,6 +726,41 @@ public struct SteppingWheel<V>: View where V: BinaryFloatingPoint, V.Stride: Bin
             }
             // onEditingChanged?(false) already called above
         }
+    }
+
+    /// Restores the wheel after UIKit or another recognizer interrupts the drag.
+    /// A cancelled touch must not preserve editing state or a transient offset.
+    private func dragCancelled() {
+        cancelAnimation()
+
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            state = .idle
+            dragOffset = 0
+            velocity = 0
+        }
+
+        snapToNearestStep()
+        endEditingSessionIfNeeded()
+    }
+
+    private func beginEditingSessionIfNeeded() {
+        guard !isEditingSessionActive else { return }
+        isEditingSessionActive = true
+        onEditingChanged?(true)
+    }
+
+    private func endEditingSessionIfNeeded() {
+        guard isEditingSessionActive else { return }
+        isEditingSessionActive = false
+        onEditingChanged?(false)
+    }
+
+    private func cancelAnimation() {
+        let timer = animationTimer
+        animationTimer = nil
+        timer?.cancel()
     }
 
     private func animateSnapBack() {
